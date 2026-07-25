@@ -80,10 +80,21 @@ app.get('/api/csrf-token', (req, res) => {
   res.json({ csrfToken: generateCsrfToken(req, res) });
 });
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/url-shortener')
-.then(() => console.log('MongoDB connected'))
-  .catch(err => console.log(err));
+// Serverless MongoDB Connection Middleware
+app.use(async (req, res, next) => {
+  if (mongoose.connection.readyState !== 1) {
+    try {
+      await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/url-shortener', {
+        serverSelectionTimeoutMS: 5000 // Fail fast if IP is blocked
+      });
+      console.log('MongoDB connected');
+    } catch (err) {
+      console.error('MongoDB connection error:', err);
+      return res.status(500).json({ message: "Database Connection Failed (Check MongoDB Atlas IP Whitelist!)" });
+    }
+  }
+  next();
+});
 
 // Swagger Configuration
 const swaggerOptions = {

@@ -112,12 +112,14 @@ const Navbar = () => {
                 </>
               ) : (
                 <>
-                  <Link to="/login" onClick={() => setIsMobileMenuOpen(false)} className="text-on-surface font-body-lg text-body-lg flex items-center gap-2">
-                    <span className="material-symbols-outlined">login</span> Login
-                  </Link>
-                  <Button variant="gradient" onClick={() => { setIsMobileMenuOpen(false); navigate('/register'); }} className="mt-2 w-full">
-                    Register
-                  </Button>
+                  <div className="flex flex-col gap-3 pt-4 mt-2 border-t border-border-glass">
+                    <Button variant="secondary" onClick={() => { setIsMobileMenuOpen(false); navigate('/login'); }} className="w-full flex items-center justify-center gap-2">
+                      <span className="material-symbols-outlined text-sm">login</span> Login
+                    </Button>
+                    <Button variant="gradient" onClick={() => { setIsMobileMenuOpen(false); navigate('/register'); }} className="w-full flex items-center justify-center gap-2">
+                      <span className="material-symbols-outlined text-sm">person_add</span> Register
+                    </Button>
+                  </div>
                 </>
               )}
             </nav>

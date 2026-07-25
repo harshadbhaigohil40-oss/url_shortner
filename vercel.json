@@ -21,8 +21,16 @@
       "destination": "/frontend/$1"
     },
     {
-      "source": "/(.*)",
+      "source": "/(login|register|dashboard|admin|unlock/.*|bio/.*)",
       "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/",
+      "destination": "/frontend/index.html"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/backend/server.js"
     }
   ]
 }

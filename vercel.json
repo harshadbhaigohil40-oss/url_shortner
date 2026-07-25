@@ -21,6 +21,10 @@
       "destination": "/frontend/$1"
     },
     {
+      "source": "/(.*\\.(ico|png|jpg|jpeg|svg|json|txt))",
+      "destination": "/frontend/$1"
+    },
+    {
       "source": "/(login|register|dashboard|admin|unlock/.*|bio/.*)",
       "destination": "/frontend/index.html"
     },

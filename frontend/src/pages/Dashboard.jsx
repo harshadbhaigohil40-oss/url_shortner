@@ -281,7 +281,7 @@ const Dashboard = () => {
       }
 
       if (removePassword) {
-        payload.password = null;
+        payload.password = "";
       }
 
       const res = await apiFetch(`${API_URL}/api/urls/${editingUrl._id}`, {

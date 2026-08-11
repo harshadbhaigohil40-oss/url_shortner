@@ -614,6 +614,44 @@ const renderSplashPage = (urlData, targetUrl) => {
 </html>`;
 };
 
+const renderDeepLinkPage = (urlData, targetUrl) => {
+  const deepLink = escapeHtml(urlData.deepLinkScheme);
+  const fallback = escapeHtml(targetUrl);
+  const title = escapeHtml(urlData.ogTitle || urlData.title || "Opening Application...");
+  const favicon = escapeHtml(urlData.favicon || "");
+
+  return `<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Opening App... | ${title}</title>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; padding: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0b0f19; color: white; font-family: 'Plus Jakarta Sans', sans-serif; }
+    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 2.5rem; max-width: 440px; width: 90%; text-align: center; backdrop-filter: blur(16px); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
+    .btn { display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; padding: 0.85rem 2rem; border-radius: 12px; text-decoration: none; font-weight: 600; margin-top: 1.5rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: transform 0.2s; }
+    .btn:hover { transform: translateY(-2px); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    ${favicon ? `<img src="${favicon}" style="width: 48px; height: 48px; border-radius: 12px; margin-bottom: 1.25rem;" />` : '<span style="font-size: 2.5rem; display: block; margin-bottom: 1rem;">📱</span>'}
+    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Opening Native Application</h2>
+    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6;">Launching custom mobile app scheme for <strong>${title}</strong>...</p>
+    <a href="${deepLink}" class="btn">Launch Mobile App</a>
+    <p style="margin-top: 2rem; font-size: 0.82rem; color: #6b7280;">If the app does not open automatically, <a href="${fallback}" style="color: #c084fc; text-decoration: underline;">click here to view in browser</a>.</p>
+  </div>
+  <script>
+    window.location.href = "${deepLink}";
+    setTimeout(function() {
+      window.location.href = "${fallback}";
+    }, 2000);
+  </script>
+</body>
+</html>`;
+};
+
 const getTargetUrl = (urlData, req) => {
   let baseTarget = urlData.longUrl;
 
@@ -709,43 +747,7 @@ exports.redirectUrl = async (req, res) => {
         });
       }
 
-const renderDeepLinkPage = (urlData, targetUrl) => {
-  const deepLink = escapeHtml(urlData.deepLinkScheme);
-  const fallback = escapeHtml(targetUrl);
-  const title = escapeHtml(urlData.ogTitle || urlData.title || "Opening Application...");
-  const favicon = escapeHtml(urlData.favicon || "");
 
-  return `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Opening App... | ${title}</title>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
-  <style>
-    body { margin: 0; padding: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #0b0f19; color: white; font-family: 'Plus Jakarta Sans', sans-serif; }
-    .card { background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 24px; padding: 2.5rem; max-width: 440px; width: 90%; text-align: center; backdrop-filter: blur(16px); box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5); }
-    .btn { display: inline-flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); color: white; padding: 0.85rem 2rem; border-radius: 12px; text-decoration: none; font-weight: 600; margin-top: 1.5rem; box-shadow: 0 4px 15px rgba(168,85,247,0.3); transition: transform 0.2s; }
-    .btn:hover { transform: translateY(-2px); }
-  </style>
-</head>
-<body>
-  <div class="card">
-    ${favicon ? `<img src="${favicon}" style="width: 48px; height: 48px; border-radius: 12px; margin-bottom: 1.25rem;" />` : '<span style="font-size: 2.5rem; display: block; margin-bottom: 1rem;">📱</span>'}
-    <h2 style="font-size: 1.5rem; margin-bottom: 0.5rem;">Opening Native Application</h2>
-    <p style="color: #9ca3af; font-size: 0.95rem; line-height: 1.6;">Launching custom mobile app scheme for <strong>${title}</strong>...</p>
-    <a href="${deepLink}" class="btn">Launch Mobile App</a>
-    <p style="margin-top: 2rem; font-size: 0.82rem; color: #6b7280;">If the app does not open automatically, <a href="${fallback}" style="color: #c084fc; text-decoration: underline;">click here to view in browser</a>.</p>
-  </div>
-  <script>
-    window.location.href = "${deepLink}";
-    setTimeout(function() {
-      window.location.href = "${fallback}";
-    }, 2000);
-  </script>
-</body>
-</html>`;
-};
 
       const analyticsData = getAnalyticsData(req, target);
       if (cachedData.userId) {
@@ -763,7 +765,7 @@ const renderDeepLinkPage = (urlData, targetUrl) => {
         { 
           $inc: { clicks: 1 }, 
           $push: { clickHistory: analyticsData },
-          ...(cachedData.isOneTime ? { isActive: false } : {})
+          ...(cachedData.isOneTime ? { $set: { isActive: false } } : {})
         },
         { new: true }
       ).then(updatedUrl => {
@@ -836,8 +838,20 @@ const renderDeepLinkPage = (urlData, targetUrl) => {
       });
     }
 
+    const analyticsData = getAnalyticsData(req, target);
+
+    // Emit real-time click event for SSE stream
+    if (url.user) {
+      clickEmitter.emit('click', {
+        userId: url.user.toString(),
+        shortCode: code,
+        title: url.title || url.longUrl,
+        analytics: analyticsData
+      });
+    }
+
     url.clicks++;
-    url.clickHistory.push(getAnalyticsData(req, target));
+    url.clickHistory.push(analyticsData);
 
     if (url.isOneTime) {
       url.isActive = false;
@@ -847,6 +861,10 @@ const renderDeepLinkPage = (urlData, targetUrl) => {
       urlCache.set(code, buildCacheObject(url));
     }
     await url.save();
+
+    if (url.deepLinkScheme) {
+      return res.status(200).send(renderDeepLinkPage(url, target));
+    }
     
     if (url.splashDelay && url.splashMessage) {
       return res.status(200).send(renderSplashPage(url, target));

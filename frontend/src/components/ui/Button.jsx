@@ -14,6 +14,8 @@ const Button = ({
   
   if (variant === 'primary') {
     baseClass += " bg-primary text-on-primary font-bold shadow-lg shadow-primary/30 hover:shadow-primary/50 hover:-translate-y-0.5 hover:bg-primary/90";
+  } else if (variant === 'secondary') {
+    baseClass += " bg-surface-glass border border-border-glass text-on-surface-variant font-bold hover:bg-surface-container-high hover:text-on-surface hover:border-primary/30 backdrop-blur-md";
   } else if (variant === 'gradient') {
     baseClass += " btn-gradient text-white font-bold rounded-xl hover:scale-105 shadow-xl shadow-purple-900/30";
   } else if (variant === 'ghost') {

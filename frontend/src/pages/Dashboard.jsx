@@ -36,6 +36,7 @@ const Dashboard = () => {
   const [sortBy, setSortBy] = useState("createdAt");
   const [order, setOrder] = useState("desc");
   const [analyticsDays, setAnalyticsDays] = useState(7);
+  const [refreshKey, setRefreshKey] = useState(0);
   
   // Expanded row state for Analytics & QR
   const [expandedId, setExpandedId] = useState(null);
@@ -100,36 +101,35 @@ const Dashboard = () => {
     fetchApiKeyDetails();
   }, [user, login, logout]);
 
-  useEffect(() => {
+  const fetchUrls = async () => {
     if (!user) return;
-
-    const fetchUrls = async () => {
-      setLoading(true);
-      try {
-        const [res, statsRes] = await Promise.all([
-          apiFetch(`${API_URL}/api/myurls?page=${page}&limit=10&search=${encodeURIComponent(debouncedSearch)}&sortBy=${sortBy}&order=${order}`, {}, user, login, logout),
-          apiFetch(`${API_URL}/api/myurls/stats`, {}, user, login, logout)
-        ]);
-        
-        if (res.ok) {
-          const data = await res.json();
-          setUrls(data.urls || []);
-          setTotalPages(data.totalPages || 1);
-        }
-        
-        if (statsRes.ok) {
-          const statsData = await statsRes.json();
-          setStats(statsData);
-        }
-      } catch (error) {
-        console.error("Error fetching urls:", error);
-      } finally {
-        setLoading(false);
+    setLoading(true);
+    try {
+      const [res, statsRes] = await Promise.all([
+        apiFetch(`${API_URL}/api/myurls?page=${page}&limit=10&search=${encodeURIComponent(debouncedSearch)}&sortBy=${sortBy}&order=${order}`, {}, user, login, logout),
+        apiFetch(`${API_URL}/api/myurls/stats`, {}, user, login, logout)
+      ]);
+      
+      if (res.ok) {
+        const data = await res.json();
+        setUrls(data.urls || []);
+        setTotalPages(data.totalPages || 1);
       }
-    };
+      
+      if (statsRes.ok) {
+        const statsData = await statsRes.json();
+        setStats(statsData);
+      }
+    } catch (error) {
+      console.error("Error fetching urls:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     fetchUrls();
-  }, [user, navigate, page, debouncedSearch, sortBy, order, login, logout]);
+  }, [user, navigate, page, debouncedSearch, sortBy, order, login, logout, refreshKey]);
 
   const { addToast } = useToast();
 
@@ -158,7 +158,8 @@ const Dashboard = () => {
     addToast('Copied to clipboard!', 'success');
   };
 
-  const deleteUrl = (id) => {
+  const deleteUrl = (urlObj) => {
+    const targetId = urlObj._id || urlObj.id;
     setConfirmDialog({
       isOpen: true,
       title: "Delete URL",
@@ -167,12 +168,12 @@ const Dashboard = () => {
       onConfirm: async () => {
         setConfirmDialog(prev => ({ ...prev, isOpen: false }));
         try {
-          const res = await apiFetch(`${API_URL}/api/urls/${id}`, {
+          const res = await apiFetch(`${API_URL}/api/urls/${targetId}`, {
             method: 'DELETE',
           }, user, login, logout);
           if (res.ok) {
-            setUrls(prev => prev.filter(u => u._id !== id));
             addToast('URL deleted successfully', 'success');
+            setRefreshKey(k => k + 1);
           } else {
             const data = await res.json();
             addToast(data.message || 'Failed to delete URL', 'error');
@@ -284,17 +285,17 @@ const Dashboard = () => {
         payload.password = "";
       }
 
-      const res = await apiFetch(`${API_URL}/api/urls/${editingUrl._id}`, {
+      const targetId = editingUrl._id || editingUrl.id;
+      const res = await apiFetch(`${API_URL}/api/urls/${targetId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       }, user, login, logout);
 
       if (res.ok) {
-        const updatedUrl = await res.json();
-        setUrls(prev => prev.map(u => u._id === editingUrl._id ? updatedUrl : u));
         addToast('URL settings updated successfully', 'success');
         closeEditModal();
+        setRefreshKey(k => k + 1);
       } else {
         const data = await res.json();
         addToast(data.message || 'Failed to update URL settings', 'error');
@@ -826,8 +827,9 @@ const Dashboard = () => {
                             </a>
                             <button 
                               onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
-                              className="material-symbols-outlined text-[18px] text-on-surface-variant opacity-0 group-hover:opacity-100 transition-opacity hover:text-primary active:scale-90"
+                              className="material-symbols-outlined text-[18px] text-on-surface-variant hover:text-primary active:scale-90 transition-colors"
                               title="Copy URL"
+                              aria-label="Copy short URL"
                             >
                               content_copy
                             </button>
@@ -865,6 +867,14 @@ const Dashboard = () => {
                               edit
                             </button>
                             <button 
+                              onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                              className="material-symbols-outlined text-on-surface-variant p-2 rounded-lg hover:bg-surface-container-highest hover:text-primary transition-colors"
+                              aria-label="Copy URL"
+                              title="Copy URL"
+                            >
+                              content_copy
+                            </button>
+                            <button 
                               onClick={() => toggleExpand(url._id)}
                               className={`material-symbols-outlined p-2 rounded-lg transition-colors ${expandedId === url._id ? 'text-primary bg-primary/10' : 'text-on-surface-variant hover:bg-surface-container-highest'}`}
                               title="View Analytics"
@@ -872,7 +882,7 @@ const Dashboard = () => {
                               {expandedId === url._id ? 'expand_less' : 'expand_more'}
                             </button>
                             <button 
-                              onClick={() => deleteUrl(url._id)}
+                              onClick={() => deleteUrl(url)}
                               className="material-symbols-outlined text-on-surface-variant p-2 rounded-lg hover:bg-error-container/20 hover:text-error transition-colors"
                               title="Delete"
                             >
@@ -1170,6 +1180,15 @@ const Dashboard = () => {
                         </Button>
                         <Button 
                           variant="outline" 
+                          className="!px-2 !py-1 text-label-sm h-auto"
+                          icon="content_copy"
+                          aria-label="Copy URL"
+                          onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                        >
+                          Copy
+                        </Button>
+                        <Button 
+                          variant="outline" 
                           className={`!px-2 !py-1 text-label-sm h-auto ${url.isActive ? 'text-emerald-400' : 'text-amber-400'}`}
                           icon={url.isActive ? 'pause' : 'play_arrow'}
                           onClick={() => toggleUrlStatus(url._id, url.isActive)}
@@ -1181,7 +1200,7 @@ const Dashboard = () => {
                         variant="danger" 
                         className="!px-2 !py-1 text-label-sm h-auto"
                         icon="delete"
-                        onClick={() => deleteUrl(url._id)}
+                        onClick={() => deleteUrl(url)}
                       >
                         Delete
                       </Button>

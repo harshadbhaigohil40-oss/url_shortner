@@ -57,12 +57,6 @@ const Home = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    
-    if (!user) {
-      addToast("Please log in to shorten URLs", "error");
-      navigate("/login");
-      return;
-    }
 
     if (!longUrl) return;
     

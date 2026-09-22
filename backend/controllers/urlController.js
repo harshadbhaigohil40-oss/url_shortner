@@ -1,3 +1,4 @@
+const mongoose = require('mongoose');
 const Url = require("../models/Url");
 const AuditLog = require("../models/AuditLog");
 const { nanoid } = require("nanoid");
@@ -246,7 +247,9 @@ exports.shortenUrl = async (req, res) => {
       details: `Created shortCode: ${shortCode}`
     });
 
-    res.status(201).json(newUrl);
+    const responseJson = newUrl.toJSON();
+    responseJson.item_id = newUrl._id;
+    res.status(201).json(responseJson);
   } catch (error) {
     res.status(500).json({ message: "Server error" });
   }
@@ -790,7 +793,13 @@ exports.redirectUrl = async (req, res) => {
     }
 
     // 2. Cache miss, query MongoDB
-    const url = await Url.findOne({ shortCode: code });
+    let url;
+    if (code && code.length === 24 && mongoose.Types.ObjectId.isValid(code)) {
+      url = await Url.findById(code);
+    }
+    if (!url) {
+      url = await Url.findOne({ shortCode: code });
+    }
     if (!url) return res.status(404).send(renderExpiredPage({ title: "ShortyURL", ogTitle: "Not Found", favicon: "" }, "The requested shortened link could not be found in our database."));
     if (!url.isActive) {
       if (url.fallbackUrl) return res.redirect(url.fallbackUrl);

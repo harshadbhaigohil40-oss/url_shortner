@@ -5,7 +5,7 @@
     "Expected": "Get CSRF Token",
     "Actual": "Token received",
     "Request": "GET /api/csrf-token",
-    "Response": "{\"csrfToken\":\"0505fd438b5f3f8db8853206080cf46799dcb494bc288f2c80473807c2dbacfe.575d9be00a747b38bd543fa4957c4a2f942f4f494f613180cfae59dd55a41e841c2cf461c5de36a407a46f80dff427a804bd2e11e3fe3be334d48dce721901d5\"}",
+    "Response": "{\"csrfToken\":\"18da48e911a7fe08a35e5f6cb47d0eba620e37935de88e0f58dd78a3d882adc4.fbccc3abf79319e6303b88ed3a0042993381bcf872b563b333b1c3333c445ca89d4c0e4c2fa463b84924c91a1fc8ffed6ffdf5658345253f7c6d146026b6b33e\"}",
     "StatusCode": 200,
     "DBChange": "None"
   },
@@ -45,7 +45,7 @@
     "Expected": "Status 201, URL in DB",
     "Actual": "URL found in DB",
     "Request": "{\"longUrl\":\"https://github.com\"}",
-    "Response": "{\"longUrl\":\"https://github.com\",\"shortCode\":\"tcHG277j\",\"title\":null,\"favicon\":null,\"clicks\":0,\"user\":\"6a64c728efd83aedc8aa1661\",\"password\":null,\"isOneTime\":false,\"isActive\":true,\"ogTitle\":null,\"ogDescription\":null,\"ogImage\":null,\"iphoneUrl\":null,\"androidUrl\":null,\"webhookUrl\":null,\"maxClicks\":null,\"fallbackUrl\":null,\"splashMessage\":null,\"splashDelay\":null,\"abTestTargets\":[],\"geoTargets\":[],\"_id\":\"6a64c729efd83aedc8aa1670\",\"clickHistory\":[],\"createdAt\":\"2026-07-25T14:24:41.263Z\",\"__v\":0}",
+    "Response": "{\"longUrl\":\"https://github.com\",\"shortCode\":\"y5cEPliu\",\"title\":null,\"favicon\":null,\"clicks\":0,\"user\":\"6ab2962a4a46bfc0c34df2e2\",\"password\":null,\"isOneTime\":false,\"isActive\":true,\"ogTitle\":null,\"ogDescription\":null,\"ogImage\":null,\"iphoneUrl\":null,\"androidUrl\":null,\"webhookUrl\":null,\"maxClicks\":null,\"fallbackUrl\":null,\"splashMessage\":null,\"splashDelay\":null,\"abTestTargets\":[],\"geoTargets\":[],\"deepLinkScheme\":null,\"aiSummary\":null,\"aiSafetyScore\":null,\"aiTags\":[],\"_id\":\"6ab2962c4a46bfc0c34df2fc\",\"clickHistory\":[],\"createdAt\":\"2026-09-22T14:52:28.445Z\",\"__v\":0,\"item_id\":\"6ab2962c4a46bfc0c34df2fc\"}",
     "StatusCode": 201,
     "DBChange": "URL inserted"
   },
@@ -55,7 +55,7 @@
     "Expected": "Status 201, 2 URLs returned",
     "Actual": "2 URLs shortened",
     "Request": "{\"links\":[{\"longUrl\":\"https://apple.com\"},{\"longUrl\":\"https://microsoft.com\"}]}",
-    "Response": "{\"results\":[{\"longUrl\":\"https://apple.com\",\"shortCode\":\"Q0hJpKUr\",\"title\":null,\"favicon\":null,\"_id\":\"6a64c729efd83aedc8aa1679\"},{\"longUrl\":\"https://microsoft.com\",\"shortCode\":\"l7skP5Nb\",\"title\":null,\"favicon\":null,\"_id\":\"6a64c729efd83aedc8aa1677\"}]}",
+    "Response": "{\"results\":[{\"longUrl\":\"https://apple.com\",\"shortCode\":\"BEhxSFQd\",\"title\":null,\"favicon\":null,\"_id\":\"6ab2962c4a46bfc0c34df305\"},{\"longUrl\":\"https://microsoft.com\",\"shortCode\":\"bpwdC7A8\",\"title\":null,\"favicon\":null,\"_id\":\"6ab2962c4a46bfc0c34df303\"}]}",
     "StatusCode": 201,
     "DBChange": "2 URLs inserted"
   },
@@ -64,7 +64,7 @@
     "Status": "PASS",
     "Expected": "Status 302, click recorded in DB",
     "Actual": "Status 302, click recorded",
-    "Request": "GET /tcHG277j",
+    "Request": "GET /y5cEPliu",
     "Response": "https://github.com",
     "StatusCode": 302,
     "DBChange": "clicks: 1"
@@ -95,7 +95,7 @@
     "Expected": "Status 200, isActive=false",
     "Actual": "isActive updated",
     "Request": "PUT /toggle",
-    "Response": "{\"_id\":\"6a64c729efd83aedc8aa1670\",\"longUrl\":\"https://github.com\",\"shortCode\":\"tcHG277j\",\"title\":\"GitHub · Change is constant. GitHub keeps you ahead. · GitHubAmerican AirlinesDuolingoErnst and YoungFordInfoSysMercado LibreMercedes-BenzShopifyPhilipsSociété GénéraleSpotifyVodafoneAmerican AirlinesDuolingoErnst and YoungFordInfoSysMercado LibreMercedes-BenzShopifyPhilipsSociété GénéraleSpotifyVodafone\",\"favicon\":\"https://github.githubassets.com/favicons/favicon.svg\",\"clicks\":1,\"user\":\"6a64c728efd83aedc8aa1661\",\"password\":null,\"isOneTime\":false,\"isActive\":false,\"ogTitle\":null,\"ogDescription\":null,\"ogImage\":null,\"iphoneUrl\":null,\"androidUrl\":null,\"webhookUrl\":null,\"maxClicks\":null,\"fallbackUrl\":null,\"splashMessage\":null,\"splashDelay\":null,\"abTestTargets\":[],\"geoTargets\":[],\"clickHistory\":[{\"timestamp\":\"2026-07-25T14:24:41.313Z\",\"browser\":\"Other\",\"os\":\"Other\",\"country\":\"US\",\"referer\":\"Direct / Email\",\"servedUrl\":\"https://github.com\",\"_id\":\"6a64c729efd83aedc8aa167d\"}],\"createdAt\":\"2026-07-25T14:24:41.263Z\",\"__v\":0}",
+    "Response": "{\"_id\":\"6ab2962c4a46bfc0c34df2fc\",\"longUrl\":\"https://github.com\",\"shortCode\":\"y5cEPliu\",\"title\":null,\"favicon\":null,\"clicks\":1,\"user\":\"6ab2962a4a46bfc0c34df2e2\",\"password\":null,\"isOneTime\":false,\"isActive\":false,\"ogTitle\":null,\"ogDescription\":null,\"ogImage\":null,\"iphoneUrl\":null,\"androidUrl\":null,\"webhookUrl\":null,\"maxClicks\":null,\"fallbackUrl\":null,\"splashMessage\":null,\"splashDelay\":null,\"abTestTargets\":[],\"geoTargets\":[],\"deepLinkScheme\":null,\"aiSummary\":null,\"aiSafetyScore\":null,\"aiTags\":[],\"clickHistory\":[{\"timestamp\":\"2026-09-22T14:52:28.565Z\",\"browser\":\"Other\",\"os\":\"Other\",\"country\":\"US\",\"referer\":\"Direct / Email\",\"servedUrl\":\"https://github.com\",\"_id\":\"6ab2962c4a46bfc0c34df309\"}],\"createdAt\":\"2026-09-22T14:52:28.445Z\",\"__v\":0}",
     "StatusCode": 200,
     "DBChange": "isActive set to false"
   },
@@ -105,7 +105,7 @@
     "Expected": "Status 200, stats returned",
     "Actual": "Stats successfully retrieved",
     "Request": "GET /admin/stats",
-    "Response": "{\"stats\":{\"totalUsers\":7,\"totalUrls\":55,\"totalClic",
+    "Response": "{\"stats\":{\"totalUsers\":12,\"totalUrls\":74,\"totalCli",
     "StatusCode": 200,
     "DBChange": "None"
   },
@@ -115,7 +115,7 @@
     "Expected": "Status 201 created, Status 200 fetched",
     "Actual": "Bio created and fetched",
     "Request": "{\"title\":\"Test Bio\",\"slug\":\"testbio123\",\"description\":\"My bio\",\"links\":[]}",
-    "Response": "{\"user\":\"6a64c728efd83aedc8aa1661\",\"slug\":\"testbio123\",\"title\":\"Test Bio\",\"bio\":\"\",\"avatarUrl\":\"\",\"theme\":\"glassmorphism\",\"socialLinks\":{\"twitter\":\"\",\"github\":\"\",\"linkedin\":\"\",\"instagram\":\"\",\"youtube\":\"\",\"website\":\"\"},\"links\":[],\"views\":0,\"_id\":\"6a64c72aefd83aedc8aa16b6\",\"createdAt\":\"2026-07-25T14:24:42.469Z\",\"__v\":0}",
+    "Response": "{\"user\":\"6ab2962a4a46bfc0c34df2e2\",\"slug\":\"testbio123\",\"title\":\"Test Bio\",\"bio\":\"\",\"avatarUrl\":\"\",\"theme\":\"glassmorphism\",\"socialLinks\":{\"twitter\":\"\",\"github\":\"\",\"linkedin\":\"\",\"instagram\":\"\",\"youtube\":\"\",\"website\":\"\"},\"links\":[],\"views\":0,\"_id\":\"6ab2962e4a46bfc0c34df345\",\"createdAt\":\"2026-09-22T14:52:30.985Z\",\"__v\":0}",
     "StatusCode": 201,
     "DBChange": "BioPage document inserted"
   }

@@ -130,6 +130,7 @@ app.use('/api/admin', adminRoutes);
 app.use('/api/bio', bioRoutes);
 app.use('/api', urlRoutes);
 app.use('/', urlRoutes);
+app.use('/root', urlRoutes);
 
 // Global Error Handler
 app.use(errorHandler);

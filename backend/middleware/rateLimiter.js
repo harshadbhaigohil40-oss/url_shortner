@@ -30,7 +30,7 @@ const securityViolation = (name, req) => {
     limiter: name,
     ip: req.ip,
     method: req.method,
-    path: req.originalUrl,
+    path: req.path,
     userId: req.user?._id?.toString() || null,
     timestamp: new Date().toISOString()
   }));

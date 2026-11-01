@@ -46,10 +46,12 @@ app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ?
 
 // Security Middlewares
 app.use(helmet());
-const allowedOrigins = process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',') : ['http://localhost:5173'];
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
+  : ['http://localhost:5173'];
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+    if (!origin || (process.env.NODE_ENV !== 'production' && allowedOrigins.includes('*')) || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       const err = new Error('Not allowed by CORS');

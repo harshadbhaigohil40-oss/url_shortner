@@ -24,3 +24,13 @@ test('environment validation rejects short secrets and missing database URL', ()
     CORS_ORIGIN: 'https://app.example.com'
   }), /Invalid server configuration/);
 });
+
+test('production environment rejects wildcard CORS', () => {
+  assert.throws(() => loadEnv({
+    NODE_ENV: 'production',
+    MONGODB_URI: 'mongodb://db.example/app',
+    JWT_SECRET: 'a'.repeat(32),
+    CSRF_SECRET: 'b'.repeat(32),
+    CORS_ORIGIN: '*'
+  }), /Invalid server configuration/);
+});

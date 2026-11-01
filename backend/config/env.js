@@ -16,6 +16,14 @@ const envSchema = z.object({
   REQUIRE_UPLOAD_SCAN: z.enum(['true', 'false']).default('false'),
   UPLOAD_DIR: z.string().optional(),
   CLAMAV_SCANNER_URL: z.string().url().optional()
+}).superRefine((config, context) => {
+  const origins = config.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
+  if (origins.length === 0) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGIN'], message: 'At least one origin is required' });
+  }
+  if (config.NODE_ENV === 'production' && origins.includes('*')) {
+    context.addIssue({ code: z.ZodIssueCode.custom, path: ['CORS_ORIGIN'], message: 'Wildcard CORS is not allowed in production' });
+  }
 });
 
 const loadEnv = (input = process.env) => {

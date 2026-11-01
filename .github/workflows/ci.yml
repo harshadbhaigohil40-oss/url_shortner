@@ -48,6 +48,9 @@ jobs:
         shell: bash
         run: |
           for file in backend/**/*.js; do node --check "$file"; done
+      - name: Frontend tests
+        run: npm test
+        working-directory: frontend
       - name: Frontend lint
         run: npm run lint
         working-directory: frontend

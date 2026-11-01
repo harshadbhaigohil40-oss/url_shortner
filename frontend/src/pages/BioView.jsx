@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 
 import { API_URL } from '../utils/api';
+import { useToast } from '../context/ToastContextInstance';
 
 const themeStyles = {
   glassmorphism: {
@@ -52,6 +53,7 @@ const themeStyles = {
 
 export default function BioView() {
   const { slug } = useParams();
+  const { addToast } = useToast();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');

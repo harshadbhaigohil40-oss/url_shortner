@@ -7,7 +7,7 @@
     "start": "node start.js",
     "dev": "nodemon start.js",
     "test": "node --test test/**/*.test.js",
-    "test:integration": "set MONGO_TEST_URI=mongodb://127.0.0.1:27017/url-shortener-test&& node --test test/**/*.integration.test.js"
+    "test:integration": "node --test test/**/*.integration.test.js"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1161.0",

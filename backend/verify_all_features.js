@@ -28,6 +28,9 @@ async function verifyFeatures() {
     // 2. Check Regex Special Character Search
     try {
       const user = await mongoose.connection.db.collection('users').findOne({ email: 'test_runtime@example.com' });
+      if (user && user.apiKeyHash) {
+        console.log('API key exists only as a hash; generate a fresh key through the API for authenticated checks.');
+      }
       if (user && user.apiKey) {
         const res = await axios.get(`${BASE_URL}/myurls?search=example.com?query=+1`, {
           headers: { 'x-api-key': user.apiKey },
@@ -46,7 +49,7 @@ async function verifyFeatures() {
           validateStatus: null
         });
 
-        if (apiKeyRes.status === 200 && apiKeyRes.data.apiKey === user.apiKey) {
+        if (apiKeyRes.status === 200 && apiKeyRes.data.apiKey && apiKeyRes.data.apiKey.includes('...')) {
           console.log("4. [PASS] API Key Details Endpoint: Successfully returned token metrics & daily limit.");
         } else {
           console.error("4. [FAIL] API Key Details Endpoint: Status", apiKeyRes.status);

@@ -1,21 +1,33 @@
 const User = require("../models/User");
 const AuditLog = require("../models/AuditLog");
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
+const bcrypt = require("bcryptjs");
+const { hashApiKey } = require('../utils/security');
 const { OAuth2Client } = require("google-auth-library");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
+const getJwtSecret = () => {
+  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
+  return process.env.JWT_SECRET;
+};
+
 const generateAccessToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || "fallback_secret", {
+  return jwt.sign({ id }, getJwtSecret(), {
     expiresIn: "15m", // Short lived
   });
 };
 
-const generateRefreshToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || "fallback_secret", {
-    expiresIn: "7d", // Long lived
-  });
+const generateRefreshToken = (id) => jwt.sign({ id, type: 'refresh' }, getJwtSecret(), { expiresIn: '7d' });
+const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+const cookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === 'production',
+  sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
+  path: '/api/auth',
+  maxAge: 7 * 24 * 60 * 60 * 1000
 };
-
+const clearCookieOptions = { ...cookieOptions, maxAge: undefined, expires: new Date(0) };
 const logAudit = async (action, userEmail, status, ipAddress, details) => {
   try {
     await AuditLog.create({ action, userEmail, status, ipAddress, details });
@@ -49,16 +61,18 @@ exports.loginUser = async (req, res) => {
     const user = await User.findOne({ email });
     if (user && (await user.matchPassword(password))) {
       
+      if (user.lockUntil && user.lockUntil > new Date()) {
+        return res.status(423).json({ message: 'Account temporarily locked. Try again later.' });
+      }
+      if (user.passwordNeedsRehash()) {
+        user.password = password;
+      }
+      user.failedLoginAttempts = 0;
+      user.lockUntil = null;
       const refreshToken = generateRefreshToken(user._id);
-      user.refreshTokens.push(refreshToken);
+      user.refreshTokens = [...user.refreshTokens.slice(-4), hashToken(refreshToken)];
       await user.save();
-
-      res.cookie('jwt', refreshToken, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'lax',
-        maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
-      });
+      res.cookie('jwt', refreshToken, cookieOptions);
 
       await logAudit('LOGIN', email, 'success', req.ip, 'User logged in successfully');
 
@@ -69,6 +83,14 @@ exports.loginUser = async (req, res) => {
         token: generateAccessToken(user._id)
       });
     } else {
+      if (user) {
+        user.failedLoginAttempts = (user.failedLoginAttempts || 0) + 1;
+        if (user.failedLoginAttempts >= 5) {
+          user.lockUntil = new Date(Date.now() + 15 * 60 * 1000);
+          user.failedLoginAttempts = 0;
+        }
+        await user.save();
+      }
       await logAudit('LOGIN_ATTEMPT', email || 'unknown', 'failure', req.ip, 'Invalid credentials');
       res.status(401).json({ message: "Invalid email or password" });
     }
@@ -105,15 +127,9 @@ exports.googleAuth = async (req, res) => {
     }
 
     const refreshToken = generateRefreshToken(user._id);
-    user.refreshTokens.push(refreshToken);
+    user.refreshTokens = [...user.refreshTokens.slice(-4), hashToken(refreshToken)];
     await user.save();
-
-    res.cookie('jwt', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('jwt', refreshToken, cookieOptions);
 
     await logAudit('LOGIN', email, 'success', req.ip, 'User logged in via Google');
 
@@ -137,12 +153,14 @@ exports.refreshToken = async (req, res) => {
   const refreshToken = cookies.jwt;
   
   try {
-    const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET || "fallback_secret");
+    const decoded = jwt.verify(refreshToken, getJwtSecret());
     const user = await User.findById(decoded.id).select("-password");
     if (!user) return res.status(401).json({ message: "Unauthorized" });
 
     // Check if refresh token is in DB
-    const tokenIndex = user.refreshTokens.indexOf(refreshToken);
+    const hashedRefreshToken = hashToken(refreshToken);
+    let tokenIndex = user.refreshTokens.indexOf(hashedRefreshToken);
+    if (tokenIndex === -1) tokenIndex = user.refreshTokens.indexOf(refreshToken);
     if (tokenIndex === -1) {
       // Token reuse detected (or logged out)! Invalidate all tokens for security.
       user.refreshTokens = [];
@@ -177,10 +195,10 @@ exports.logoutUser = async (req, res) => {
   if (cookies?.jwt) {
     const refreshToken = cookies.jwt;
     try {
-      const decoded = jwt.verify(refreshToken, process.env.JWT_SECRET || "fallback_secret");
+      const decoded = jwt.verify(refreshToken, getJwtSecret());
       const user = await User.findById(decoded.id);
       if (user) {
-        user.refreshTokens = user.refreshTokens.filter(t => t !== refreshToken);
+        user.refreshTokens = user.refreshTokens.filter(t => t !== hashToken(refreshToken));
         await user.save();
       }
     } catch (e) {
@@ -188,20 +206,51 @@ exports.logoutUser = async (req, res) => {
     }
   }
 
-  res.cookie('jwt', '', {
-    httpOnly: true,
-    expires: new Date(0)
-  });
+  res.cookie('jwt', '', clearCookieOptions);
   res.status(200).json({ message: "Logged out successfully" });
+};
+
+exports.requestPasswordReset = async (req, res) => {
+  const generic = { message: 'If the account exists, password reset instructions will be sent.' };
+  try {
+    const user = await User.findOne({ email: req.body.email });
+    if (user) {
+      const token = crypto.randomBytes(32).toString('hex');
+      user.passwordResetTokenHash = hashToken(token);
+      user.passwordResetExpires = new Date(Date.now() + 15 * 60 * 1000);
+      await user.save();
+      await logAudit('PASSWORD_RESET_REQUEST', user.email, 'success', req.ip, 'Password reset token issued');
+      if (process.env.PASSWORD_RESET_URL) console.info(`Password reset delivery required for ${user.email}: ${process.env.PASSWORD_RESET_URL}?token=${token}`);
+    }
+    return res.json(generic);
+  } catch (error) {
+    return res.json(generic);
+  }
+};
+
+exports.resetPassword = async (req, res) => {
+  try {
+    const user = await User.findOne({ passwordResetTokenHash: hashToken(req.body.token), passwordResetExpires: { $gt: new Date() } });
+    if (!user) return res.status(400).json({ message: 'Invalid or expired reset token' });
+    user.password = req.body.password;
+    user.passwordResetTokenHash = null;
+    user.passwordResetExpires = null;
+    user.refreshTokens = [];
+    await user.save();
+    await logAudit('PASSWORD_RESET', user.email, 'success', req.ip, 'Password reset completed');
+    return res.json({ message: 'Password reset successfully' });
+  } catch (error) {
+    return res.status(400).json({ message: 'Invalid or expired reset token' });
+  }
 };
 
 exports.getApiKeyDetails = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("apiKey apiKeyCreatedAt apiKeyLastUsed apiKeyRequestCount apiKeyRateLimit");
+    const user = await User.findById(req.user._id).select("apiKeyPrefix apiKeyCreatedAt apiKeyLastUsed apiKeyRequestCount apiKeyRateLimit");
     if (!user) return res.status(404).json({ message: "User not found" });
 
     res.json({
-      apiKey: user.apiKey || null,
+      apiKey: user.apiKeyPrefix || null,
       createdAt: user.apiKeyCreatedAt || null,
       lastUsed: user.apiKeyLastUsed || null,
       requestCount: user.apiKeyRequestCount || 0,
@@ -218,7 +267,8 @@ exports.generateApiKey = async (req, res) => {
     if (!user) return res.status(404).json({ message: "User not found" });
 
     const newApiKey = "sk_" + require("crypto").randomBytes(16).toString("hex");
-    user.apiKey = newApiKey;
+    user.apiKeyHash = hashApiKey(newApiKey);
+    user.apiKeyPrefix = `${newApiKey.slice(0, 8)}...`;
     user.apiKeyCreatedAt = new Date();
     user.apiKeyRequestCount = 0;
     await user.save();
@@ -227,6 +277,7 @@ exports.generateApiKey = async (req, res) => {
 
     res.json({ 
       apiKey: newApiKey,
+      apiKeyPrefix: user.apiKeyPrefix,
       createdAt: user.apiKeyCreatedAt,
       requestCount: 0,
       rateLimit: user.apiKeyRateLimit || 1000
@@ -241,7 +292,8 @@ exports.revokeApiKey = async (req, res) => {
     const user = await User.findById(req.user._id);
     if (!user) return res.status(404).json({ message: "User not found" });
 
-    user.apiKey = undefined;
+    user.apiKeyHash = undefined;
+    user.apiKeyPrefix = undefined;
     user.apiKeyCreatedAt = undefined;
     user.apiKeyLastUsed = undefined;
     user.apiKeyRequestCount = 0;

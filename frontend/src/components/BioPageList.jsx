@@ -48,12 +48,16 @@ export default function BioPageList({ onCreateNew, onEdit }) {
     }
   };
 
-  const copyBioUrl = (slug) => {
+  const copyBioUrl = async (slug) => {
     const fullUrl = `${window.location.origin}/bio/${slug}`;
-    navigator.clipboard.writeText(fullUrl);
-    setCopiedSlug(slug);
-    addToast('Bio page link copied to clipboard!', 'success');
-    setTimeout(() => setCopiedSlug(null), 2500);
+    try {
+      await navigator.clipboard.writeText(fullUrl);
+      setCopiedSlug(slug);
+      addToast('Bio page link copied to clipboard!', 'success');
+      setTimeout(() => setCopiedSlug(null), 2500);
+    } catch {
+      addToast('Unable to copy the bio page link.', 'error');
+    }
   };
 
   if (loading) {

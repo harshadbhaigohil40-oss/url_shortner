@@ -107,8 +107,8 @@ async function runTests() {
       const res = await axios.post(`${BASE_URL}/auth/generate-api-key`, {}, { headers });
       const user = await mongoose.connection.db.collection('users').findOne({ _id: testUserId });
       
-      if (res.status === 200 && user.apiKey === res.data.apiKey) {
-        recordResult("API Key Generation", "PASS", "Status 200, API Key saved in DB", "API Key matches DB", "POST /auth/generate-api-key", "Key Hidden", res.status, "apiKey field populated");
+      if (res.status === 200 && res.data.apiKey && user.apiKeyHash) {
+        recordResult("API Key Generation", "PASS", "Status 200, API key returned once and hash saved", "API key generated", "POST /auth/generate-api-key", "Key Hidden", res.status, "apiKeyHash field populated");
       } else {
         recordResult("API Key Generation", "FAIL", "Status 200", "Mismatch", "POST", JSON.stringify(res.data), res.status, "Mismatch");
       }

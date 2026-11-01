@@ -28,7 +28,19 @@ const SimpleLoader = () => (
 );
 
 function App() {
-  const [showPreloader, setShowPreloader] = useState(true);
+  const [showPreloader, setShowPreloader] = useState(() => {
+    try {
+      return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return true;
+    }
+  });
+
+  useEffect(() => {
+    if (!showPreloader) return undefined;
+    const timeout = window.setTimeout(() => setShowPreloader(false), 12000);
+    return () => window.clearTimeout(timeout);
+  }, [showPreloader]);
 
   const handlePreloaderComplete = () => {
     setShowPreloader(false);

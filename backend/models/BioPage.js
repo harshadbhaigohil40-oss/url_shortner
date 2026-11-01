@@ -26,6 +26,7 @@ const bioPageSchema = new mongoose.Schema({
   title: { type: String, required: true, default: "My Bio Page" },
   bio: { type: String, default: "" },
   avatarUrl: { type: String, default: "" },
+  avatarStoragePath: { type: String, default: "", select: false },
   theme: {
     type: String,
     enum: ["glassmorphism", "dark-neon", "minimal-light", "cyberpunk", "sunset"],

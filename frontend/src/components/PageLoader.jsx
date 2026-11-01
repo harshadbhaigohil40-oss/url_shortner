@@ -134,7 +134,7 @@ const PageLoader = ({ onComplete }) => {
 
     // Warp Particles trigger
     const warpParticles = gsap.utils.toArray('.warp-particle');
-    warpParticles.forEach((particle, i) => {
+    warpParticles.forEach((particle) => {
       tl.to(particle, {
         z: 1500, // blast past camera
         opacity: 1,

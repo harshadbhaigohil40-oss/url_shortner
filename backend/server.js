@@ -1,26 +1,48 @@
 require('dotenv').config();
+
+// Vercel loads this file directly, so production configuration must be loaded here.
+const { loadProductionSecrets } = require('./config/secrets');
+const { loadEnv } = require('./config/env');
+
+const configurationReady = loadProductionSecrets()
+  .then(() => loadEnv())
+  .catch((error) => {
+    console.error(JSON.stringify({ event: 'startup_configuration_failed', message: error.message }));
+    throw error;
+  });
+
 const express = require('express');
 const mongoose = require('mongoose');
+const { connectDatabase } = require('./config/database');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const { doubleCsrf } = require('csrf-csrf');
 const morgan = require('morgan');
-const rateLimit = require('express-rate-limit');
+const pinoHttp = require('pino-http');
+const crypto = require('crypto');
+const logger = require('./utils/logger');
+const { globalLimiter } = require('./middleware/rateLimiter');
 
 const urlRoutes = require('./routes/urlRoutes');
 const authRoutes = require('./routes/authRoutes');
 const adminRoutes = require('./routes/adminRoutes');
 const bioRoutes = require('./routes/bioRoutes');
-const { errorHandler } = require('./middleware/errorMiddleware');
+const { errorHandler, notFoundHandler } = require('./middleware/errorMiddleware');
 const swaggerUi = require('swagger-ui-express');
 const swaggerJsdoc = require('swagger-jsdoc');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
+// Delay requests until optional production secrets have finished loading.
+app.use((req, res, next) => {
+  configurationReady.then(() => next()).catch(next);
+});
+
 // Trust proxy for accurate client IP behind reverse proxies (Cloudflare, Nginx, Vercel, etc.)
-app.set('trust proxy', 1);
+const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
+app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1);
 
 // Security Middlewares
 app.use(helmet());
@@ -37,25 +59,27 @@ app.use(cors({
   },
   credentials: true
 }));
-app.use(express.json());
+app.use(express.json({ limit: '100kb' }));
+app.use(express.urlencoded({ extended: false, limit: '100kb' }));
 app.use(cookieParser());
 
 // Logging Middleware
-app.use(morgan('dev'));
-
-// Global Rate Limiting
-const globalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes)
-  message: 'Too many requests from this IP, please try again after 15 minutes',
-  standardHeaders: true, 
-  legacyHeaders: false, 
+app.use((req, res, next) => {
+  req.id = req.headers['x-request-id'] || crypto.randomUUID();
+  res.setHeader('X-Request-Id', req.id);
+  next();
 });
+app.use(pinoHttp({ logger, genReqId: (req) => req.id, autoLogging: process.env.NODE_ENV !== 'test' }));
+
+// Global distributed rate limiting. The limiter uses Redis when REDIS_URL is configured.
 app.use('/api', globalLimiter);
 
 // CSRF Protection
 const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
-  getSecret: () => process.env.CSRF_SECRET || 'csrf-super-secret-key',
+  getSecret: () => {
+    if (!process.env.CSRF_SECRET) throw new Error('CSRF_SECRET is required');
+    return process.env.CSRF_SECRET;
+  },
   cookieName: 'x-csrf-token',
   cookieOptions: {
     sameSite: 'lax',
@@ -67,11 +91,10 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   getSessionIdentifier: (req) => "stateless",
 });
 
-// CSRF Protection (Bypassed for programmatic requests authenticated via x-api-key)
+// API-key authentication is applied by protected routes. CSRF remains required for
+// browser-cookie requests; API clients may use the explicit API-key route policy.
 app.use((req, res, next) => {
-  if (req.headers['x-api-key']) {
-    return next();
-  }
+  if (req.headers['x-api-key'] && req.path.startsWith('/api/')) return next();
   doubleCsrfProtection(req, res, next);
 });
 
@@ -80,20 +103,33 @@ app.get('/api/csrf-token', (req, res) => {
   res.json({ csrfToken: generateCsrfToken(req, res) });
 });
 
-// Serverless MongoDB Connection Middleware
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', service: 'url-shortener', timestamp: new Date().toISOString() });
+});
+
+app.get('/ready', async (req, res) => {
+  const mongoReady = mongoose.connection.readyState === 1;
+  const { redisStatus } = require('./middleware/rateLimiter');
+  const redis = redisStatus();
+  const dependencies = {
+    mongodb: mongoReady ? 'ok' : 'unavailable',
+    redis: !redis.configured ? 'not_configured' : (redis.ready ? 'ok' : 'unavailable')
+  };
+  const ready = mongoReady && (!redis.configured || redis.ready);
+  return res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', dependencies });
+});
+
+// Shared MongoDB connection pool for all requests and instances.
 app.use(async (req, res, next) => {
-  if (mongoose.connection.readyState !== 1) {
-    try {
-      await mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/url-shortener', {
-        serverSelectionTimeoutMS: 5000 // Fail fast if IP is blocked
-      });
-      console.log('MongoDB connected');
-    } catch (err) {
-      console.error('MongoDB connection error:', err);
-      return res.status(500).json({ message: "Database Connection Failed (Check MongoDB Atlas IP Whitelist!)" });
-    }
+  try {
+    await connectDatabase();
+    next();
+  } catch (err) {
+    logger.error({ err }, 'MongoDB connection failed');
+    const connectionError = new Error('Database unavailable');
+    connectionError.statusCode = 503;
+    next(connectionError);
   }
-  next();
 });
 
 // Swagger Configuration
@@ -106,7 +142,7 @@ const swaggerOptions = {
       description: 'API documentation for the MERN URL Shortener project.',
     },
     servers: [
-      { url: `http://localhost:${PORT}` }
+      { url: process.env.PUBLIC_API_URL || `http://localhost:${PORT}` }
     ],
     components: {
       securitySchemes: {
@@ -132,13 +168,22 @@ app.use('/api', urlRoutes);
 app.use('/', urlRoutes);
 app.use('/root', urlRoutes);
 
-// Global Error Handler
+// Consistent 404 and global error responses
+app.use(notFoundHandler);
 app.use(errorHandler);
+
+process.on('unhandledRejection', (reason) => {
+  logger.fatal({ err: reason }, 'unhandled promise rejection');
+});
+process.on('uncaughtException', (error) => {
+  logger.fatal({ err: error }, 'uncaught exception');
+  process.exit(1);
+});
 
 let server;
 if (process.env.NODE_ENV !== 'production') {
   server = app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
+    logger.info({ port: PORT }, 'Server running');
   });
 
   const gracefulShutdown = () => {

@@ -61,8 +61,7 @@ const buildCacheObject = (url) => ({
 });
 
 const getClientIp = (req) => {
-  const forwarded = req.headers['x-forwarded-for'];
-  let ip = forwarded ? forwarded.split(',')[0].trim() : (req.headers['x-real-ip'] || req.socket.remoteAddress || "");
+  let ip = req.ip || req.socket.remoteAddress || "";
   if (ip.startsWith('::ffff:')) {
     ip = ip.replace('::ffff:', '');
   }
@@ -105,9 +104,25 @@ const getAnalyticsData = (req, servedUrl = null) => {
 };
 
 const dns = require('dns').promises;
+const net = require('net');
+
+const isPrivateIp = (ip) => {
+  const normalized = ip.toLowerCase().replace(/^::ffff:/, '');
+  if (net.isIPv4(normalized)) {
+    const parts = normalized.split('.').map(Number);
+    return parts[0] === 10 || parts[0] === 127 || parts[0] === 0 ||
+      (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+      (parts[0] === 192 && parts[1] === 168) || (parts[0] === 169 && parts[1] === 254);
+  }
+  if (!net.isIPv6(normalized)) return true;
+  return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') ||
+    normalized.startsWith('fd') || normalized.startsWith('fe8') || normalized.startsWith('fe9') ||
+    normalized.startsWith('fea') || normalized.startsWith('feb');
+};
 
 const isPrivateHost = async (host) => {
-  const hostname = host.toLowerCase();
+  const hostname = host.toLowerCase().replace(/\.$/, '');
+  if (isPrivateIp(hostname)) return true;
   
   if (hostname === 'localhost' || hostname === 'loopback' || hostname === '::1') {
     return true;
@@ -119,19 +134,23 @@ const isPrivateHost = async (host) => {
   }
 
   try {
-    const lookup = await dns.lookup(host);
-    const ip = lookup.address;
-    if (ip === '127.0.0.1' || ip === '::1' || ipv4PrivateRegex.test(ip)) {
-      return true;
-    }
-    if (ip.startsWith('fe80:') || ip.startsWith('fc00:') || ip.startsWith('fd00:')) {
-      return true;
-    }
+    const lookups = await dns.lookup(hostname, { all: true, verbatim: true });
+    if (lookups.some(({ address }) => isPrivateIp(address))) return true;
   } catch {
-    // lookup failed
+    return true;
   }
 
   return false;
+};
+
+const isSafeExternalUrl = async (value) => {
+  try {
+    const parsed = new URL(value);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return false;
+    return !(await isPrivateHost(parsed.hostname));
+  } catch {
+    return false;
+  }
 };
 
 const fetchMetadata = async (url) => {
@@ -143,16 +162,27 @@ const fetchMetadata = async (url) => {
       return { title: null, favicon: null };
     }
 
-    const response = await axios.get(url, { 
-      timeout: 3000,
-      maxRedirects: 3
-    });
+    let currentUrl = url;
+    let response;
+    for (let redirect = 0; redirect <= 3; redirect += 1) {
+      if (!(await isSafeExternalUrl(currentUrl))) return { title: null, favicon: null };
+      response = await axios.get(currentUrl, {
+        timeout: 3000,
+        maxRedirects: 0,
+        validateStatus: (status) => status >= 200 && status < 400
+      });
+      if (![301, 302, 303, 307, 308].includes(response.status)) break;
+      const location = response.headers.location;
+      if (!location || redirect === 3) return { title: null, favicon: null };
+      currentUrl = new URL(location, currentUrl).toString();
+    }
     const $ = cheerio.load(response.data);
     const title = $("title").text() || null;
     let favicon = $('link[rel="icon"]').attr("href") || $('link[rel="shortcut icon"]').attr("href");
     
-    if (favicon && !favicon.startsWith('http')) {
-      favicon = new URL(favicon, urlObj.origin).toString();
+    if (favicon) {
+      favicon = new URL(favicon, currentUrl).toString();
+      if (!(await isSafeExternalUrl(favicon))) favicon = null;
     }
     return { title, favicon };
   } catch (error) {
@@ -701,10 +731,13 @@ const getTargetUrl = (urlData, req) => {
   return baseTarget;
 };
 
-const triggerWebhook = (webhookUrl, eventData) => {
-  if (!webhookUrl) return;
-  axios.post(webhookUrl, eventData, { timeout: 2500 })
-    .catch(err => console.error(`[Webhook Error] Failed to send click event to ${webhookUrl}:`, err.message));
+const triggerWebhook = async (webhookUrl, eventData) => {
+  if (!webhookUrl || !(await isSafeExternalUrl(webhookUrl))) {
+    if (webhookUrl) console.warn(`[Webhook] Blocked unsafe destination: ${webhookUrl}`);
+    return;
+  }
+  axios.post(webhookUrl, eventData, { timeout: 2500, maxRedirects: 0 })
+    .catch(err => console.error('[Webhook Error] Delivery failed:', err.message));
 };
 
 exports.redirectUrl = async (req, res) => {
@@ -762,25 +795,33 @@ exports.redirectUrl = async (req, res) => {
         });
       }
 
-      // Asynchronously update analytics and check click limit or one-time use
-      Url.findOneAndUpdate(
-        { shortCode: code },
-        { 
-          $inc: { clicks: 1 }, 
-          $push: { clickHistory: analyticsData },
-          ...(cachedData.isOneTime ? { $set: { isActive: false } } : {})
-        },
-        { new: true }
-      ).then(updatedUrl => {
-        if (cachedData.isOneTime) {
-          urlCache.set(code, { ...cachedData, isActive: false });
-        } else if (updatedUrl && updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
-          updatedUrl.isActive = false;
-          updatedUrl.save();
-          urlCache.set(code, buildCacheObject(updatedUrl));
-        }
-      }).catch(err => console.error("Async analytics update error", err));
-      
+      // Reserve the click atomically so one-time and max-click links cannot be overused.
+      const clickFilter = {
+        shortCode: code,
+        isActive: true,
+        $or: [
+          { maxClicks: null },
+          { maxClicks: { $exists: false } },
+          { $expr: { $lt: ['$clicks', '$maxClicks'] } }
+        ]
+      };
+      const clickUpdate = {
+        $inc: { clicks: 1 },
+        $push: { clickHistory: { $each: [analyticsData], $slice: -100 } },
+        ...(cachedData.isOneTime ? { $set: { isActive: false } } : {})
+      };
+      const updatedUrl = await Url.findOneAndUpdate(clickFilter, clickUpdate, { new: true });
+      if (!updatedUrl) {
+        urlCache.set(code, { ...cachedData, isActive: false });
+        if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
+        return res.status(410).send(renderExpiredPage(cachedData, 'This link is no longer available.'));
+      }
+      if (updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
+        updatedUrl.isActive = false;
+        await updatedUrl.save();
+      }
+      urlCache.set(code, buildCacheObject(updatedUrl));
+
       if (cachedData.deepLinkScheme) {
         return res.status(200).send(renderDeepLinkPage(cachedData, target));
       }
@@ -861,6 +902,7 @@ exports.redirectUrl = async (req, res) => {
 
     url.clicks++;
     url.clickHistory.push(analyticsData);
+     if (url.clickHistory.length > 100) url.clickHistory = url.clickHistory.slice(-100);
 
     if (url.isOneTime) {
       url.isActive = false;
@@ -964,22 +1006,46 @@ exports.unlockUrl = async (req, res) => {
     const url = await Url.findOne({ shortCode: code });
     if (!url) return res.status(404).json({ message: "URL not found" });
     if (!url.isActive) return res.status(403).json({ message: "Link is disabled", fallbackUrl: url.fallbackUrl });
+    if (url.expiresAt && new Date() > new Date(url.expiresAt)) {
+      url.isActive = false;
+      await url.save();
+      urlCache.set(code, buildCacheObject(url));
+      return res.status(410).json({ message: "Link has expired", fallbackUrl: url.fallbackUrl });
+    }
+    if (url.maxClicks && url.clicks >= url.maxClicks) {
+      url.isActive = false;
+      await url.save();
+      urlCache.set(code, buildCacheObject(url));
+      return res.status(410).json({ message: "Link has reached its maximum click limit", fallbackUrl: url.fallbackUrl });
+    }
     if (!url.password) return res.status(400).json({ message: "URL is not password protected" });
 
     const isMatch = await bcrypt.compare(password, url.password);
     if (!isMatch) return res.status(401).json({ message: "Incorrect password" });
 
     const targetUrl = getTargetUrl(url, req);
-
-    // Track analytics for unlocked redirect
-    url.clicks++;
-    url.clickHistory.push(getAnalyticsData(req, targetUrl));
-
-    if (url.maxClicks && url.clicks >= url.maxClicks) {
-      url.isActive = false;
-      urlCache.set(code, buildCacheObject(url));
+    const analyticsData = getAnalyticsData(req, targetUrl);
+    const clickFilter = {
+      _id: url._id,
+      isActive: true,
+      $or: [
+        { maxClicks: null },
+        { maxClicks: { $exists: false } },
+        { $expr: { $lt: ['$clicks', '$maxClicks'] } }
+      ]
+    };
+    const clickUpdate = {
+      $inc: { clicks: 1 },
+      $push: { clickHistory: { $each: [analyticsData], $slice: -100 } },
+      ...(url.isOneTime ? { $set: { isActive: false } } : {})
+    };
+    const updatedUrl = await Url.findOneAndUpdate(clickFilter, clickUpdate, { new: true });
+    if (!updatedUrl) return res.status(410).json({ message: "Link is no longer available", fallbackUrl: url.fallbackUrl });
+    if (updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
+      updatedUrl.isActive = false;
+      await updatedUrl.save();
     }
-    await url.save();
+    urlCache.set(code, buildCacheObject(updatedUrl));
 
     // Trigger Webhook Event Asynchronously
     if (url.webhookUrl) {
@@ -989,7 +1055,7 @@ exports.unlockUrl = async (req, res) => {
         longUrl: url.longUrl,
         targetUrl: targetUrl,
         timestamp: new Date().toISOString(),
-        analytics: getAnalyticsData(req, targetUrl)
+        analytics: analyticsData
       });
     }
 

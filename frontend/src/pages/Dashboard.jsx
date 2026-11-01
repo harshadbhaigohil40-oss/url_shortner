@@ -129,6 +129,8 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchUrls();
+    // fetchUrls uses the current dashboard filters and auth callbacks.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, navigate, page, debouncedSearch, sortBy, order, login, logout, refreshKey]);
 
   const { addToast } = useToast();
@@ -153,9 +155,13 @@ const Dashboard = () => {
     setExpandedId(expandedId === id ? null : id);
   };
 
-  const copyToClipboard = (shortUrl) => {
-    navigator.clipboard.writeText(shortUrl);
-    addToast('Copied to clipboard!', 'success');
+  const copyToClipboard = async (shortUrl) => {
+    try {
+      await navigator.clipboard.writeText(shortUrl);
+      addToast('Copied to clipboard!', 'success');
+    } catch {
+      addToast('Unable to copy the URL.', 'error');
+    }
   };
 
   const deleteUrl = (urlObj) => {

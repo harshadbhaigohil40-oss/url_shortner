@@ -119,7 +119,10 @@ const Home = () => {
         let errorMsg = data.message || "Failed to shorten URL";
         if (data.errors && data.errors.length > 0) {
           const fieldError = data.errors[0];
-          errorMsg = `${fieldError.path.join('.')}: ${fieldError.message}`;
+          const field = Array.isArray(fieldError.path)
+            ? fieldError.path.join('.')
+            : (fieldError.field || 'Request');
+          errorMsg = `${field}: ${fieldError.message}`;
         }
         throw new Error(errorMsg);
       }
@@ -207,10 +210,13 @@ const Home = () => {
     }
   };
 
-  const copyToClipboard = () => {
-    if (shortUrl) {
-      navigator.clipboard.writeText(shortUrl);
+  const copyToClipboard = async () => {
+    if (!shortUrl) return;
+    try {
+      await navigator.clipboard.writeText(shortUrl);
       addToast("Shortened URL copied to clipboard!", "success");
+    } catch {
+      addToast("Unable to copy the URL. Please copy it manually.", "error");
     }
   };
 
@@ -748,8 +754,9 @@ const Home = () => {
                         </a>
                         <button 
                           onClick={() => {
-                            navigator.clipboard.writeText(`${API_URL}/${result.shortCode}`);
-                            addToast("Copied to clipboard!", "success");
+                            navigator.clipboard.writeText(`${API_URL}/${result.shortCode}`)
+                              .then(() => addToast("Copied to clipboard!", "success"))
+                              .catch(() => addToast("Unable to copy the URL.", "error"));
                           }}
                           className="w-8 h-8 rounded bg-surface-container-high hover:bg-primary/20 hover:text-primary transition-colors flex items-center justify-center cursor-pointer"
                           title="Copy Link"

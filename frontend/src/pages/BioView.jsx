@@ -88,10 +88,14 @@ export default function BioView() {
     window.open(targetUrl, '_blank', 'noopener,noreferrer');
   };
 
-  const handleShare = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2500);
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    } catch {
+      addToast('Unable to copy the bio page link.', 'error');
+    }
   };
 
   if (loading) {

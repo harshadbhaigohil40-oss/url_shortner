@@ -18,9 +18,10 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['user', 'admin'],
+    enum: ['user', 'admin', 'manager', 'guest'],
     default: 'user'
   },
+  permissions: [{ type: String, trim: true }],
   otp: {
     type: String
   },
@@ -28,10 +29,21 @@ const userSchema = new mongoose.Schema({
     type: Date
   },
   refreshTokens: [String],
+  failedLoginAttempts: { type: Number, default: 0 },
+  lockUntil: { type: Date, default: null },
+  passwordResetTokenHash: { type: String, default: null },
+  passwordResetExpires: { type: Date, default: null },
   apiKey: {
     type: String,
-    unique: true,
-    sparse: true
+    select: false
+  },
+  apiKeyHash: {
+    type: String,
+    select: false
+  },
+  apiKeyPrefix: {
+    type: String,
+    index: true
   },
   apiKeyCreatedAt: {
     type: Date,
@@ -61,7 +73,11 @@ userSchema.pre('save', async function(next) {
 
 userSchema.methods.matchPassword = async function(enteredPassword) {
   if (!this.password) return false;
-  return await bcrypt.compare(enteredPassword, this.password);
+  return bcrypt.compare(enteredPassword, this.password);
+};
+
+userSchema.methods.passwordNeedsRehash = function() {
+  return Boolean(this.password && this.password.startsWith('$2') && Number.parseInt(this.password.slice(4, 6), 10) < 12);
 };
 
 module.exports = mongoose.model("User", userSchema);

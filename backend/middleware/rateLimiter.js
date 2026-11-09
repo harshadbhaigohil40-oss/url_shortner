@@ -41,18 +41,16 @@ const headers = (res, rateLimitInfo) => {
   const reset = rateLimitInfo.resetTime instanceof Date
     ? Math.ceil(rateLimitInfo.resetTime.getTime() / 1000)
     : rateLimitInfo.resetTime;
-  res.setHeader('X-RateLimit-Limit', rateLimitInfo.limit);
-  res.setHeader('X-RateLimit-Remaining', rateLimitInfo.remaining);
-  if (reset) res.setHeader('X-RateLimit-Reset', reset);
+  if (reset) res.setHeader('Retry-After', Math.max(1, reset - Math.ceil(Date.now() / 1000)));
 };
 
 const createLimiter = (name, windowMs, max, message, options = {}) => rateLimit({
   windowMs,
   max,
   ...(redisClient ? { store: createStore(name) } : {}),
-  standardHeaders: true,
-  legacyHeaders: true,
-  passOnStoreError: options.passOnStoreError ?? (name === 'global-api' || name === 'shorten'),
+  standardHeaders: false,
+  legacyHeaders: false,
+  passOnStoreError: options.passOnStoreError ?? false,
   ...options,
   handler: (req, res) => {
     securityViolation(name, req);
@@ -65,8 +63,13 @@ const createLimiter = (name, windowMs, max, message, options = {}) => rateLimit(
   }
 });
 
-const globalLimiter = createLimiter('global-api', 15 * 60 * 1000, 100, 'Too many requests, please try again later');
-const authLimiter = createLimiter('authentication', 15 * 60 * 1000, 10, 'Too many authentication attempts, please try again later');
+const globalLimiter = createLimiter('global-api', 15 * 60 * 1000, 100, 'Too many requests, please try again later', {
+  passOnStoreError: true
+});
+
+// Tightened authentication limits to mitigate credential stuffing attacks
+const authLimiter = createLimiter('authentication', 15 * 60 * 1000, 5, 'Too many authentication attempts, please try again later');
+
 const shortenLimiter = createLimiter('shorten', 15 * 60 * 1000, 30, 'Too many URLs created, please try again later');
 const unlockLimiter = createLimiter('unlock', 15 * 60 * 1000, 20, 'Too many unlock attempts, please try again later');
 const analysisLimiter = createLimiter('ai-analysis', 15 * 60 * 1000, 10, 'Too many analysis requests, please try again later');

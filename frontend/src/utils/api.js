@@ -40,9 +40,9 @@ export const apiFetch = async (url, options = {}, user, login, logout) => {
   let response = await fetch(url, options);
 
   // If CSRF token is invalid, retry once after fetching a new one
-  if (response.status === 403 && response.statusText === "Forbidden") {
+  if (response.status === 403) {
      const resData = await response.clone().json().catch(()=>({}));
-     if (resData.message === 'Invalid CSRF Token') {
+     if (resData.message === 'Invalid CSRF Token' || resData.error?.code === 'CSRF_INVALID') {
        await fetchCsrf();
        options.headers['x-csrf-token'] = csrfToken;
        response = await fetch(url, options);

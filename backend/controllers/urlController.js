@@ -255,7 +255,10 @@ exports.shortenUrl = async (req, res) => {
       aiTags
     });
     
-    // Pre-populate cache
+    // Pre-populate cache with target tracking
+    const targetUserId = user;
+    const targetResource = 'Url';
+
     urlCache.set(shortCode, buildCacheObject(newUrl));
 
     // Fetch metadata asynchronously
@@ -1389,5 +1392,10 @@ exports.analyzeUrlWithAi = async (req, res) => {
     res.status(500).json({ message: "Failed to analyze target URL" });
   }
 };
+
+// Export helper functions for testing
+module.exports.isPrivateIp = isPrivateIp;
+module.exports.isPrivateHost = isPrivateHost;
+module.exports.isSafeExternalUrl = isSafeExternalUrl;
 
 

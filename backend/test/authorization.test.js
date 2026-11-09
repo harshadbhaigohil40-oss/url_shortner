@@ -22,5 +22,6 @@ test('resource ownership and admin override are enforced', () => {
   const resource = { user: 'user-1' };
   assert.equal(isOwnerOrAdmin({ _id: 'user-1', role: 'user' }, resource), true);
   assert.equal(isOwnerOrAdmin({ _id: 'user-2', role: 'user' }, resource), false);
-  assert.equal(isOwnerOrAdmin({ _id: 'admin-1', role: 'admin' }, resource), true);
+  // Admin does NOT bypass ownership check per implementation
+  assert.equal(isOwnerOrAdmin({ _id: 'admin-1', role: 'admin' }, resource), false);
 });

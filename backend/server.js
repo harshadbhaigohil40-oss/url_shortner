@@ -15,6 +15,12 @@ const express = require('express');
 const mongoose = require('mongoose');
 const { connectDatabase } = require('./config/database');
 const cors = require('cors');
+
+// Connect to database at startup (not per-request)
+connectDatabase().catch((err) => {
+  logger.error({ err }, 'MongoDB connection failed at startup');
+  process.exit(1);
+});
 const cookieParser = require('cookie-parser');
 const helmet = require('helmet');
 const { doubleCsrf } = require('csrf-csrf');
@@ -44,14 +50,42 @@ app.use((req, res, next) => {
 const trustProxyHops = Number.parseInt(process.env.TRUST_PROXY_HOPS || '1', 10);
 app.set('trust proxy', Number.isInteger(trustProxyHops) && trustProxyHops >= 0 ? trustProxyHops : 1);
 
+// Startup validation: verify configured hop count makes sense for the deployment topology.
+// Operator must set TRUST_PROXY_HOPS to match the actual number of trusted proxy hops
+// from client to app in their real deployment. Wrong count can allow IP spoofing.
+const trustProxyWarningMessages = [];
+if (trustProxyHops === 0) {
+  trustProxyWarningMessages.push('WARNING: TRUST_PROXY_HOPS is 0 — proxy trust is disabled; req.ip will be the raw client IP, spoofable via X-Forwarded-For');
+} else if (trustProxyHops > 5) {
+  trustProxyWarningMessages.push(`WARNING: TRUST_PROXY_HOPS is ${trustProxyHops} — this is unusually high. Verify this matches your actual proxy topology (typically 1-3 hops behind Cloudflare/load balancers).`);
+}
+// Note: Do NOT hardcode a value here. The env var is operator-controlled after topology verification.
+// If no warning was emitted, the configured value is accepted as-is.
+if (trustProxyWarningMessages.length > 0) {
+  trustProxyWarningMessages.forEach((msg) => logger.warn({ event: 'trust_proxy_startup_warning', message: msg }));
+} else {
+  logger.info({ event: 'trust_proxy_startup_configured', trustProxyHops }, 'Trust proxy configuration loaded');
+}
+
 // Security Middlewares
-app.use(helmet());
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "ws:", "wss:"],
+    }
+  }
+}));
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
   : ['http://localhost:5173'];
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || (process.env.NODE_ENV !== 'production' && allowedOrigins.includes('*')) || allowedOrigins.includes(origin)) {
+    if (!origin || allowedOrigins.includes(origin)) {
       callback(null, true);
     } else {
       const err = new Error('Not allowed by CORS');
@@ -121,18 +155,8 @@ app.get('/ready', async (req, res) => {
   return res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', dependencies });
 });
 
-// Shared MongoDB connection pool for all requests and instances.
-app.use(async (req, res, next) => {
-  try {
-    await connectDatabase();
-    next();
-  } catch (err) {
-    logger.error({ err }, 'MongoDB connection failed');
-    const connectionError = new Error('Database unavailable');
-    connectionError.statusCode = 503;
-    next(connectionError);
-  }
-});
+// MongoDB connection is established at startup
+// No per-request middleware needed
 
 // Swagger Configuration
 const swaggerOptions = {

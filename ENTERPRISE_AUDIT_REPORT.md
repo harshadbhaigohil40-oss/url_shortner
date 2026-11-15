@@ -74,16 +74,13 @@ In `jwt-keyring.js`, the active key ID (`kid`) was dynamically generated using r
 
 ---
 
-## 4. Containerization & DevOps Ready
+## 4. Production Process Management (Standard Node.js / PM2)
 
-The repository now includes production-ready Docker and orchestration assets:
+The application runs directly on standard Node.js (Node 18+) without requiring Docker:
 
-| Asset | Purpose | Security Hardening |
-|---|---|---|
-| `backend/Dockerfile` | Multi-stage Node 22 Alpine build | Non-root `node` user, healthcheck, stripped test/scratch files |
-| `frontend/Dockerfile` | Multi-stage Vite + Nginx Alpine build | Asset compression, strict security headers, SPA fallback |
-| `frontend/nginx.conf` | Optimized web server configuration | Gzip on, 1-year immutable caching on static assets, frame deny |
-| `docker-compose.yml` | Local & staging full-stack runner | MongoDB 7, Redis 7.2 LRU cache, Backend, Frontend with health dependencies |
+* **Backend Execution:** `node start.js` or via process manager `pm2 start start.js --name shortly-api -i max`.
+* **Frontend Execution:** Static distribution via `npm run build`, serving `dist/` over any HTTP web server (Caddy, Apache, Nginx, or cloud static hosting like Vercel/Netlify/S3/Cloudflare Pages).
+* **Cluster Reliability:** Graceful shutdown handles `SIGINT`/`SIGTERM` with 10-second timeout enforcement, properly cleaning up MongoDB, Redis, and event listeners.
 
 ---
 

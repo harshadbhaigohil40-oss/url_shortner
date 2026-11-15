@@ -4,9 +4,12 @@ const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 
 const getJwtSecret = () => {
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
-  return process.env.JWT_SECRET;
-}
+  if (process.env.JWT_SECRET) return process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === 'test') {
+    return 'ci-test-jwt-secret-key-at-least-32-characters-long';
+  }
+  throw new Error('JWT_SECRET is required');
+};
 
 // Generate a secure random key ID (kid) for JWT tokens
 const generateKid = () => crypto.randomBytes(8).toString('hex');

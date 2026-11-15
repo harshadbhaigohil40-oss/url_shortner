@@ -1,3 +1,7 @@
+process.env.NODE_ENV = process.env.NODE_ENV || 'test';
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = 'ci-test-jwt-secret-key-at-least-32-characters-long';
+}
 require('dotenv').config();
 const test = require('node:test');
 const assert = require('node:assert/strict');

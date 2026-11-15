@@ -39,15 +39,22 @@ jobs:
       - name: Backend tests
         run: npm test
         working-directory: backend
+        env:
+          NODE_ENV: test
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters-long
+          CSRF_SECRET: ci-test-csrf-secret-key-at-least-32-characters-long
       - name: Backend concurrency integration test
         run: npm run test:integration
         working-directory: backend
         env:
+          NODE_ENV: test
+          JWT_SECRET: ci-test-jwt-secret-key-at-least-32-characters-long
+          CSRF_SECRET: ci-test-csrf-secret-key-at-least-32-characters-long
           MONGO_TEST_URI: mongodb://127.0.0.1:27017/url-shortener-test
       - name: Backend syntax checks
         shell: bash
         run: |
-          for file in backend/**/*.js; do node --check "$file"; done
+          find backend -type f -name "*.js" ! -path "*/node_modules/*" -exec node --check {} +
       - name: Frontend tests
         run: npm test
         working-directory: frontend

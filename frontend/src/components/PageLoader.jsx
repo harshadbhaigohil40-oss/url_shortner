@@ -17,9 +17,10 @@ const PageLoader = ({ onComplete }) => {
   const bgGlowRef = useRef(null);
   const ringsRef = useRef(null);
   const innerCardRef = useRef(null);
-  
+
   const completedRef = useRef(false);
   const [progress, setProgress] = useState(0);
+  const tlRef = useRef(null);
 
   // Generate 40 warp particles with random initial positions
   const particles = useMemo(() => {
@@ -36,12 +37,12 @@ const PageLoader = ({ onComplete }) => {
   const massiveUrl = "https://shorty.url/api/v1/routing/complex?ref=ui&tracking_id=898723498723498&hash=abc123def456ghi789jkl012mno345pqr678stu901vwx234yz567";
   const targetLength = 18;
   const currentLength = Math.max(targetLength, massiveUrl.length - Math.floor((progress / 100) * (massiveUrl.length - targetLength)));
-  
+
   // Create a scrambled version of the text
   const scrambleChars = '!<>-_\\/[]{}—=+*^?#_';
   const displayUrl = useMemo(() => {
     if (progress === 100) return "https://shorty.url";
-    
+
     let result = massiveUrl.substring(0, currentLength);
     // Scramble the last 5 characters for glitch effect
     if (progress > 5 && progress < 95) {
@@ -67,129 +68,151 @@ const PageLoader = ({ onComplete }) => {
     fixedContentRef.current.style.setProperty('--mouse-y', `${y}px`);
   };
 
+  // Respect user motion preference
+  const prefersReducedMotion =
+    typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   useEffect(() => {
+    if (prefersReducedMotion) {
+      document.body.style.overflow = 'auto';
+      document.documentElement.style.overflow = 'auto';
+      if (onComplete) onComplete();
+      return undefined;
+    }
+
     window.scrollTo(0, 0);
     document.body.style.overflow = 'auto';
+    document.documentElement.style.overflow = 'auto';
 
-    // --- INITIAL ENTRY ASSEMBLY ANIMATION ---
-    const entryTl = gsap.timeline();
-    
-    // Set initial states
-    gsap.set(innerCardRef.current, { scaleY: 0, opacity: 0 });
-    gsap.set(ringsRef.current, { scale: 0, rotation: -180 });
-    gsap.set('.glitch-text', { opacity: 0, y: 20 });
-    gsap.set('.data-node', { opacity: 0, scale: 0 });
-    
-    entryTl.to(innerCardRef.current, { scaleY: 1, opacity: 1, duration: 0.8, ease: "power3.out" })
-           .to(ringsRef.current, { scale: 1, rotation: 0, duration: 1, ease: "elastic.out(1, 0.5)" }, "-=0.4")
-           .to('.glitch-text', { opacity: 1, y: 0, duration: 0.5, stagger: 0.1 }, "-=0.6")
-           .to('.data-node', { opacity: 0.3, scale: 1, duration: 0.8, stagger: 0.1, ease: "back.out(1.2)" }, "-=0.4");
+    // gsap.context scopes selectors and auto-tracks every tween/ScrollTrigger
+    // created inside, so ctx.revert() kills them all on unmount.
+    // NOTE: ctx is never referenced inside the callback itself (that would be a
+    // temporal-dead-zone error since gsap.context invokes the callback
+    // synchronously before the const assignment completes). Scoped element
+    // lookups use containerRef.current.querySelectorAll instead of ctx.query.
+    const ctx = gsap.context(() => {
+      // --- INITIAL ENTRY ASSEMBLY ANIMATION ---
+      const entryTl = gsap.timeline();
 
-    // --- SCROLL SEQUENCE ANIMATION ---
-    const tl = gsap.timeline({
-      scrollTrigger: {
-        trigger: containerRef.current,
-        start: 'top top',
-        end: 'bottom bottom',
-        scrub: 1.5,
-        pin: fixedContentRef.current,
-        onUpdate: (self) => {
-          const currentProgress = Math.floor(self.progress * 100);
-          setProgress(currentProgress);
-          
-          if (self.progress >= 0.99 && onComplete && !completedRef.current) {
-            completedRef.current = true;
-            document.body.style.overflow = 'auto';
-            document.documentElement.style.overflow = 'auto';
-            setTimeout(() => onComplete(), 100);
-          }
-        },
-        onLeave: () => {
-          if (onComplete && !completedRef.current) {
-            completedRef.current = true;
-            document.body.style.overflow = 'auto';
-            document.documentElement.style.overflow = 'auto';
-            setTimeout(() => onComplete(), 100);
+      gsap.set(innerCardRef.current, { scaleY: 0, opacity: 0 });
+      gsap.set(ringsRef.current, { scale: 0, rotation: -180 });
+      gsap.set('.glitch-text', { opacity: 0, y: 20 });
+      gsap.set('.data-node', { opacity: 0, scale: 0 });
+
+      entryTl
+        .to(innerCardRef.current, { scaleY: 1, opacity: 1, duration: 0.8, ease: "power3.out" })
+        .to(ringsRef.current, { scale: 1, rotation: 0, duration: 1, ease: "elastic.out(1, 0.5)" }, "-=0.4")
+        .to('.glitch-text', { opacity: 1, y: 0, duration: 0.5, stagger: 0.1 }, "-=0.6")
+        .to('.data-node', { opacity: 0.3, scale: 1, duration: 0.8, stagger: 0.1, ease: "back.out(1.2)" }, "-=0.4");
+
+      // --- SCROLL SEQUENCE ANIMATION ---
+      const tl = gsap.timeline({
+        scrollTrigger: {
+          trigger: containerRef.current,
+          start: 'top top',
+          end: 'bottom bottom',
+          scrub: 1.5,
+          pin: fixedContentRef.current,
+          onUpdate: (self) => {
+            const currentProgress = Math.floor(self.progress * 100);
+            setProgress(currentProgress);
+
+            if (self.progress >= 0.99 && onComplete && !completedRef.current) {
+              completedRef.current = true;
+              document.body.style.overflow = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              setTimeout(() => onComplete(), 100);
+            }
+          },
+          onLeave: () => {
+            if (onComplete && !completedRef.current) {
+              completedRef.current = true;
+              document.body.style.overflow = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              setTimeout(() => onComplete(), 100);
+            }
           }
         }
-      }
-    });
+      });
 
-    // Stage 1: The Dive (0% to 30%)
-    tl.to(gridRef.current, { rotateX: 10, scale: 2.5, opacity: 0.8, backgroundPosition: "0px 800px", ease: "power1.inOut", duration: 3 }, 0);
-    tl.to(cardRef.current, { scale: 0.85, y: 30, ease: "power1.inOut", duration: 3 }, 0);
+      tlRef.current = tl;
 
-    const nodes = gsap.utils.toArray('.data-node', nodesRef.current);
-    nodes.forEach((node, i) => {
-      tl.to(node, { opacity: 1, duration: 0.5 }, 0 + (i * 0.2));
-      tl.to(node, { z: 800, x: (i % 2 === 0 ? -400 : 400), y: (i < 2 ? -300 : 300), duration: 3 + (i * 0.2), ease: "power2.in" }, 0);
-    });
+      // Stage 1: The Dive (0% to 30%)
+      tl.to(gridRef.current, { rotateX: 10, scale: 2.5, opacity: 0.8, backgroundPosition: "0px 800px", ease: "power1.inOut", duration: 3 }, 0)
+        .to(cardRef.current, { scale: 0.85, y: 30, ease: "power1.inOut", duration: 3 }, 0);
 
-    // Stage 2: The Compression & Warp Speed (30% to 60%)
-    tl.to(gridRef.current, { scale: 4, opacity: 0, backgroundPosition: "0px 1500px", ease: "power2.in", duration: 3 }, 3);
-    tl.to(orbsRef.current, { scale: 4, opacity: 0, duration: 3 }, 3);
-    
-    nodes.forEach((node) => tl.to(node, { opacity: 0, duration: 1 }, 3));
-    tl.to(cardRef.current, { rotateY: 360, duration: 3, ease: "power1.inOut" }, 3);
+      const nodes = containerRef.current.querySelectorAll('.data-node');
+      nodes.forEach((node, i) => {
+        tl.to(node, { opacity: 1, duration: 0.5 }, 0 + (i * 0.2));
+        tl.to(node, { z: 800, x: (i % 2 === 0 ? -400 : 400), y: (i < 2 ? -300 : 300), duration: 3 + (i * 0.2), ease: "power2.in" }, 0);
+      });
 
-    // Warp Particles trigger
-    const warpParticles = gsap.utils.toArray('.warp-particle');
-    warpParticles.forEach((particle) => {
-      tl.to(particle, {
-        z: 1500, // blast past camera
-        opacity: 1,
-        duration: 1.5 + Math.random(),
-        ease: "power4.in"
-      }, 3 + (Math.random() * 1.5));
-    });
+      // Stage 2: The Compression & Warp Speed (30% to 60%)
+      tl.to(gridRef.current, { scale: 4, opacity: 0, backgroundPosition: "0px 1500px", ease: "power2.in", duration: 3 }, 3)
+        .to(orbsRef.current, { scale: 4, opacity: 0, duration: 3 }, 3);
 
-    // Stage 3: Core Ignition (60% to 85%)
-    tl.to(bgGlowRef.current, { opacity: 1, duration: 2.5 }, 6);
-    tl.to(ringsRef.current, { scale: 1.6, duration: 2.5, ease: "back.out(1.5)" }, 6);
+      nodes.forEach((node) => tl.to(node, { opacity: 0, duration: 1 }, 3));
+      tl.to(cardRef.current, { rotateY: 360, duration: 3, ease: "power1.inOut" }, 3);
 
-    // Stage 4: Blast Through (85% to 100%)
-    tl.to(cardRef.current, { scale: 20, opacity: 0, duration: 1.5, ease: "power3.in" }, 8.5);
-    tl.to(fixedContentRef.current, { opacity: 0, duration: 0.5 }, 9.5);
+      // Warp Particles trigger
+      const warpParticles = containerRef.current.querySelectorAll('.warp-particle');
+      warpParticles.forEach((particle) => {
+        tl.to(particle, {
+          z: 1500, // blast past camera
+          opacity: 1,
+          duration: 1.5 + Math.random(),
+          ease: "power4.in"
+        }, 3 + (Math.random() * 1.5));
+      });
+
+      // Stage 3: Core Ignition (60% to 85%)
+      tl.to(bgGlowRef.current, { opacity: 1, duration: 2.5 }, 6)
+        .to(ringsRef.current, { scale: 1.6, duration: 2.5, ease: "back.out(1.5)" }, 6);
+
+      // Stage 4: Blast Through (85% to 100%)
+      tl.to(cardRef.current, { scale: 20, opacity: 0, duration: 1.5, ease: "power3.in" }, 8.5)
+        .to(fixedContentRef.current, { opacity: 0, duration: 0.5 }, 9.5);
+    }, containerRef.current);
 
     return () => {
-      entryTl.kill();
-      tl.kill();
-      ScrollTrigger.getAll().forEach(t => t.kill());
+      // Kills every GSAP animation and ScrollTrigger created inside the context.
+      ctx.revert();
+      tlRef.current = null;
       document.body.style.overflow = '';
       document.documentElement.style.overflow = '';
     };
-  }, [onComplete]);
+  }, [onComplete, prefersReducedMotion]);
 
   return (
     <div ref={containerRef} className="h-[400vh] w-full bg-slate-950 relative z-[100]">
       {/* Interactive Spotlight Wrapper */}
-      <div 
-        ref={fixedContentRef} 
+      <div
+        ref={fixedContentRef}
         onMouseMove={handleMouseMove}
-        className="h-[100dvh] w-full flex flex-col items-center justify-center overflow-hidden relative perspective-1000 bg-background"
+        className="h-[100dvh] w-full flex flex-col items-center justify-center relative perspective-1000 bg-background"
         style={{
           '--mouse-x': '50vw',
           '--mouse-y': '50vh',
           background: 'radial-gradient(circle 800px at var(--mouse-x) var(--mouse-y), rgba(59,130,246,0.1), transparent 80%)'
         }}
       >
-        
+
         {/* Dynamic Background Glow Layer */}
         <div ref={bgGlowRef} className="absolute inset-0 bg-emerald-950/40 opacity-0 z-0 pointer-events-none">
           <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,var(--emerald-500)_0%,transparent_50%)] opacity-30 blur-3xl mix-blend-screen"></div>
         </div>
-        
+
         {/* 3D Grid */}
-        <div 
+        <div
           ref={gridRef}
           className="absolute inset-0 bg-[linear-gradient(var(--glow-blue)_2px,transparent_2px),linear-gradient(90deg,var(--glow-blue)_2px,transparent_2px)] bg-[size:50px_50px] opacity-40 origin-bottom [transform-style:preserve-3d] pointer-events-none"
-          style={{ transform: 'rotateX(60deg) translateY(0) translateZ(-200px)', WebkitMaskImage: 'linear-gradient(to bottom, transparent 15%, black 70%)', maskImage: 'linear-gradient(to bottom, transparent 15%, black 70%)' }}
+          style={{ WebkitMaskImage: 'linear-gradient(to bottom, transparent 15%, black 70%)', maskImage: 'linear-gradient(to bottom, transparent 15%, black 70%)' }}
         ></div>
-        
+
         {/* Warp Particles Layer */}
         <div ref={particlesRef} className="absolute inset-0 w-full h-full pointer-events-none perspective-1000 [transform-style:preserve-3d] z-0">
           {particles.map((p) => (
-            <div 
+            <div
               key={p.id}
               className="warp-particle absolute w-[2px] h-[40px] rounded-full opacity-0"
               style={{
@@ -206,7 +229,7 @@ const PageLoader = ({ onComplete }) => {
         {/* Ambient Orbs */}
         <div ref={orbsRef} className="absolute inset-0 w-full h-full pointer-events-none flex items-center justify-center z-0">
           <div className="orb bg-primary w-72 h-72 absolute -top-32 -left-32 animate-float"></div>
-          <div className="orb bg-secondary w-72 h-72 absolute -bottom-32 -right-32 animate-float" style={{ animationDelay: '-5s' }}></div>
+          <div className="orb bg-secondary w-72 h-72 absolute -bottom-32 -right-32 animate-float" style={{ animationDelay: '-5s' }}/>
         </div>
 
         {/* 3D Parallax Data Nodes */}
@@ -235,12 +258,12 @@ const PageLoader = ({ onComplete }) => {
         <div ref={cardRef} className="relative z-20 w-full max-w-sm px-6 md:px-0 [transform-style:preserve-3d]">
           <TiltCard tiltMaxAngleX={15} tiltMaxAngleY={15}>
             <div ref={innerCardRef} className="flex flex-col items-center gap-8 p-12 glass-panel rounded-3xl border border-border-glass text-center shadow-[0_0_50px_rgba(59,130,246,0.2)] bg-surface-glass backdrop-blur-xl origin-bottom">
-              
+
               {/* 3D Rotating Loader */}
               <div ref={ringsRef} className="relative w-24 h-24 perspective-1000 drop-shadow-[0_0_20px_var(--primary)] flex items-center justify-center">
                 <div className="absolute inset-0 border-4 border-t-primary border-r-secondary border-b-transparent border-l-transparent rounded-full animate-[spin_2s_linear_infinite] [transform-style:preserve-3d]"></div>
                 <div className="absolute inset-2 border-4 border-t-transparent border-r-transparent border-b-primary border-l-secondary rounded-full animate-[spin_1.5s_linear_infinite_reverse] [transform-style:preserve-3d]"></div>
-                
+
                 {/* Center Glowing Icon */}
                 <div className="absolute inset-0 m-auto w-12 h-12 rounded-full bg-primary/20 shadow-[0_0_30px_var(--primary)] animate-pulse flex items-center justify-center backdrop-blur-md border border-primary/30">
                   {progress < 100 ? (
@@ -256,7 +279,7 @@ const PageLoader = ({ onComplete }) => {
                   <h2 className="text-xl font-display-lg text-on-surface premium-glow-text tracking-widest animate-pulse">
                     {progress === 100 ? "READY" : "SHRINKING URL"}
                   </h2>
-                  
+
                   {/* Dynamic Scrambling URL */}
                   <div className="mt-3 bg-background/50 border border-border-glass rounded-lg p-3 overflow-hidden relative shadow-inner">
                     <p className="font-mono text-primary truncate text-xs transition-all duration-75">
@@ -264,7 +287,7 @@ const PageLoader = ({ onComplete }) => {
                     </p>
                   </div>
                 </div>
-                
+
                 {/* Progress Bar */}
                 <div className="w-full space-y-2 glitch-text">
                   <div className="flex justify-between text-xs font-bold text-primary uppercase">
@@ -272,8 +295,8 @@ const PageLoader = ({ onComplete }) => {
                     <span>{progress}%</span>
                   </div>
                   <div className="h-1.5 w-full bg-surface-container rounded-full overflow-hidden shadow-inner border border-border-glass relative">
-                    <div 
-                      className="h-full bg-accent-gradient shadow-[0_0_10px_var(--primary)] transition-all duration-75" 
+                    <div
+                      className="h-full bg-accent-gradient shadow-[0_0_10px_var(--primary)] transition-all duration-75"
                       style={{ width: `${progress}%` }}
                     ></div>
                   </div>
@@ -282,7 +305,7 @@ const PageLoader = ({ onComplete }) => {
             </div>
           </TiltCard>
         </div>
-        
+
         {/* Scroll Indicator */}
         <div className="absolute bottom-16 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center animate-bounce text-text-muted glitch-text">
           <span className="material-symbols-outlined text-3xl">keyboard_arrow_down</span>

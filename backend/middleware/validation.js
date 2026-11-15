@@ -29,7 +29,7 @@ const validate = (schema, source = 'body') => (req, res, next) => {
   next();
 };
 
-const urlString = z.string().trim().url().refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are allowed');
+const urlString = z.string().trim().max(2048).url().refine((value) => /^https?:\/\//i.test(value), 'Only HTTP(S) URLs are allowed');
 const optionalUrl = urlString.or(z.literal('')).optional().nullable();
 const dateSchema = z.string().refine((val) => !val || !isNaN(Date.parse(val)), 'Invalid date format').optional().nullable();
 const customAliasSchema = z.string().trim().min(3).max(30).regex(/^[a-zA-Z0-9_-]+$/, 'Alphanumeric, underscores, and dashes only').or(z.literal('')).optional().nullable();

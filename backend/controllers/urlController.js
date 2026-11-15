@@ -8,8 +8,7 @@ const cheerio = require("cheerio");
 const useragent = require("useragent");
 const geoip = require("geoip-lite");
 const { LRUCache } = require('lru-cache');
-const EventEmitter = require('events');
-const clickEmitter = new EventEmitter();
+const eventBus = require('../utils/eventBus');
 
 const urlCache = new LRUCache({
   max: 1000,
@@ -162,26 +161,22 @@ const fetchMetadata = async (url) => {
       return { title: null, favicon: null };
     }
 
-    let currentUrl = url;
-    let response;
-    for (let redirect = 0; redirect <= 3; redirect += 1) {
-      if (!(await isSafeExternalUrl(currentUrl))) return { title: null, favicon: null };
-      response = await axios.get(currentUrl, {
-        timeout: 3000,
-        maxRedirects: 0,
-        validateStatus: (status) => status >= 200 && status < 400
-      });
-      if (![301, 302, 303, 307, 308].includes(response.status)) break;
-      const location = response.headers.location;
-      if (!location || redirect === 3) return { title: null, favicon: null };
-      currentUrl = new URL(location, currentUrl).toString();
-    }
+    // SECURITY FIX: No redirect following to prevent DNS rebinding attacks
+    // Only fetch the original URL, not redirects
+    if (!(await isSafeExternalUrl(url))) return { title: null, favicon: null };
+
+    const response = await axios.get(url, {
+      timeout: 3000,
+      maxRedirects: 0, // Do NOT follow redirects - prevents SSRF via DNS rebinding
+      validateStatus: (status) => status >= 200 && status < 400
+    });
+
     const $ = cheerio.load(response.data);
     const title = $("title").text() || null;
     let favicon = $('link[rel="icon"]').attr("href") || $('link[rel="shortcut icon"]').attr("href");
-    
+
     if (favicon) {
-      favicon = new URL(favicon, currentUrl).toString();
+      favicon = new URL(favicon, url).toString();
       if (!(await isSafeExternalUrl(favicon))) favicon = null;
     }
     return { title, favicon };
@@ -261,11 +256,9 @@ exports.shortenUrl = async (req, res) => {
 
     urlCache.set(shortCode, buildCacheObject(newUrl));
 
-    // Fetch metadata asynchronously
+    // Fetch metadata asynchronously without clobbering concurrent clicks
     fetchMetadata(longUrl).then(async ({ title, favicon }) => {
-      newUrl.title = title;
-      newUrl.favicon = favicon;
-      await newUrl.save();
+      await Url.updateOne({ _id: newUrl._id }, { $set: { title, favicon } });
       const currentCache = urlCache.get(shortCode);
       if (currentCache) {
         urlCache.set(shortCode, { ...currentCache, title, favicon });
@@ -734,18 +727,56 @@ const getTargetUrl = (urlData, req) => {
   return baseTarget;
 };
 
+const crypto = require('crypto');
+
+// Generate idempotency key for webhook delivery
+const generateIdempotencyKey = (eventData) => {
+  const payload = `${eventData.event}:${eventData.shortCode}:${eventData.timestamp}:${eventData.targetUrl || ''}`;
+  return crypto.createHash('sha256').update(payload).digest('hex').substring(0, 32);
+};
+
+// Sign webhook payload for verification
+const signWebhookPayload = (payload, secret) => {
+  return crypto.createHmac('sha256', secret).update(JSON.stringify(payload)).digest('hex');
+};
+
 const triggerWebhook = async (webhookUrl, eventData) => {
   if (!webhookUrl || !(await isSafeExternalUrl(webhookUrl))) {
     if (webhookUrl) console.warn(`[Webhook] Blocked unsafe destination: ${webhookUrl}`);
     return;
   }
-  axios.post(webhookUrl, eventData, { timeout: 2500, maxRedirects: 0 })
-    .catch(err => console.error('[Webhook Error] Delivery failed:', err.message));
+
+  // Generate idempotency key for exactly-once delivery semantics
+  const idempotencyKey = generateIdempotencyKey(eventData);
+
+  // Get webhook secret from environment (configured per deployment)
+  const webhookSecret = process.env.WEBHOOK_SECRET || 'default-secret-change-in-production';
+
+  // Sign the payload for receiver verification
+  const signature = signWebhookPayload(eventData, webhookSecret);
+
+  try {
+    await axios.post(webhookUrl, eventData, {
+      timeout: 3000,
+      maxRedirects: 0,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Shortly-Webhook-Dispatcher/1.0',
+        'X-Idempotency-Key': idempotencyKey,
+        'X-Shortly-Signature': `sha256=${signature}`,
+        'X-Shortly-Event': eventData.event,
+        'X-Shortly-Timestamp': eventData.timestamp
+      }
+    });
+  } catch (err) {
+    console.error(`[Webhook Error] Delivery failed for ${eventData.shortCode}:`, err.message);
+    // TODO: Add to retry queue (BullMQ) for production
+  }
 };
 
 exports.redirectUrl = async (req, res) => {
   const { code } = req.params;
-  const frontendUrl = process.env.CORS_ORIGIN || 'http://localhost:5173';
+  const frontendUrl = (process.env.FRONTEND_URL || (process.env.CORS_ORIGIN ? process.env.CORS_ORIGIN.split(',')[0].trim() : 'http://localhost:5173')).replace(/\/+$/, '');
   const userAgent = req.headers['user-agent'];
   const botCheck = isBot(userAgent);
 
@@ -753,87 +784,94 @@ exports.redirectUrl = async (req, res) => {
     // 1. Check cache first for high-performance redirect
     const cachedData = urlCache.get(code);
     if (cachedData) {
-      if (!cachedData.isActive) {
-        if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
-        return res.status(404).send(renderExpiredPage(cachedData, "This link has been deactivated or disabled by its owner."));
-      }
-      
-      if (cachedData.expiresAt && new Date() > new Date(cachedData.expiresAt)) {
-        urlCache.set(code, { ...cachedData, isActive: false });
-        if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
-        return res.status(410).send(renderExpiredPage(cachedData, "This link has expired."));
-      }
-      
-      if (cachedData.isProtected) {
-        return res.redirect(`${frontendUrl}/unlock/${code}`);
-      }
+      // CRITICAL: Re-verify DB state for protected/one-time/max-click links to prevent cache bypass
+      const needsDbVerification = cachedData.isProtected || cachedData.isOneTime ||
+        (cachedData.maxClicks && cachedData.clicks >= cachedData.maxClicks);
 
-      if (botCheck) {
-        return res.status(200).send(renderOGPage({ ...cachedData, longUrl: cachedData.longUrl }));
-      }
+      if (needsDbVerification) {
+        // Fall through to DB path for authoritative check
+      } else {
+        // Fast path: cache hit with no special handling needed
+        if (!cachedData.isActive) {
+          if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
+          return res.status(404).send(renderExpiredPage(cachedData, "This link has been deactivated or disabled by its owner."));
+        }
 
-      const target = getTargetUrl(cachedData, req);
+        if (cachedData.expiresAt && new Date() > new Date(cachedData.expiresAt)) {
+          urlCache.set(code, { ...cachedData, isActive: false });
+          if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
+          return res.status(410).send(renderExpiredPage(cachedData, "This link has expired."));
+        }
 
-      // Trigger Webhook Event Asynchronously
-      if (cachedData.webhookUrl) {
-        triggerWebhook(cachedData.webhookUrl, {
-          event: "link.click",
+        if (cachedData.isProtected) {
+          return res.redirect(`${frontendUrl}/unlock/${code}`);
+        }
+
+        if (botCheck) {
+          return res.status(200).send(renderOGPage({ ...cachedData, longUrl: cachedData.longUrl }));
+        }
+
+        const target = getTargetUrl(cachedData, req);
+
+        // Trigger Webhook Event Asynchronously
+        if (cachedData.webhookUrl) {
+          triggerWebhook(cachedData.webhookUrl, {
+            event: "link.click",
+            shortCode: code,
+            longUrl: cachedData.longUrl,
+            targetUrl: target,
+            timestamp: new Date().toISOString(),
+            analytics: getAnalyticsData(req, target)
+          });
+        }
+
+        const analyticsData = getAnalyticsData(req, target);
+        if (cachedData.userId) {
+          eventBus.publishClick({
+            userId: cachedData.userId,
+            shortCode: code,
+            title: cachedData.title || cachedData.longUrl,
+            analytics: analyticsData
+          });
+        }
+
+        // Reserve the click atomically so one-time and max-click links cannot be overused.
+        const clickFilter = {
           shortCode: code,
-          longUrl: cachedData.longUrl,
-          targetUrl: target,
-          timestamp: new Date().toISOString(),
-          analytics: getAnalyticsData(req, target)
-        });
+          isActive: true,
+          $or: [
+            { maxClicks: null },
+            { maxClicks: { $exists: false } },
+            { $expr: { $lt: ['$clicks', '$maxClicks'] } }
+          ]
+        };
+        const clickUpdate = {
+          $inc: { clicks: 1 },
+          $push: { clickHistory: { $each: [analyticsData], $slice: -100 } },
+          ...(cachedData.isOneTime ? { $set: { isActive: false } } : {})
+        };
+        const updatedUrl = await Url.findOneAndUpdate(clickFilter, clickUpdate, { new: true });
+        if (!updatedUrl) {
+          urlCache.set(code, { ...cachedData, isActive: false });
+          if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
+          return res.status(410).send(renderExpiredPage(cachedData, 'This link is no longer available.'));
+        }
+        if (updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
+          updatedUrl.isActive = false;
+          await updatedUrl.save();
+        }
+        urlCache.set(code, buildCacheObject(updatedUrl));
+
+        if (cachedData.deepLinkScheme) {
+          return res.status(200).send(renderDeepLinkPage(cachedData, target));
+        }
+
+        if (cachedData.splashDelay && cachedData.splashMessage) {
+          return res.status(200).send(renderSplashPage(cachedData, target));
+        }
+
+        return res.redirect(target);
       }
-
-
-
-      const analyticsData = getAnalyticsData(req, target);
-      if (cachedData.userId) {
-        clickEmitter.emit('click', {
-          userId: cachedData.userId,
-          shortCode: code,
-          title: cachedData.title || cachedData.longUrl,
-          analytics: analyticsData
-        });
-      }
-
-      // Reserve the click atomically so one-time and max-click links cannot be overused.
-      const clickFilter = {
-        shortCode: code,
-        isActive: true,
-        $or: [
-          { maxClicks: null },
-          { maxClicks: { $exists: false } },
-          { $expr: { $lt: ['$clicks', '$maxClicks'] } }
-        ]
-      };
-      const clickUpdate = {
-        $inc: { clicks: 1 },
-        $push: { clickHistory: { $each: [analyticsData], $slice: -100 } },
-        ...(cachedData.isOneTime ? { $set: { isActive: false } } : {})
-      };
-      const updatedUrl = await Url.findOneAndUpdate(clickFilter, clickUpdate, { new: true });
-      if (!updatedUrl) {
-        urlCache.set(code, { ...cachedData, isActive: false });
-        if (cachedData.fallbackUrl) return res.redirect(cachedData.fallbackUrl);
-        return res.status(410).send(renderExpiredPage(cachedData, 'This link is no longer available.'));
-      }
-      if (updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
-        updatedUrl.isActive = false;
-        await updatedUrl.save();
-      }
-      urlCache.set(code, buildCacheObject(updatedUrl));
-
-      if (cachedData.deepLinkScheme) {
-        return res.status(200).send(renderDeepLinkPage(cachedData, target));
-      }
-
-      if (cachedData.splashDelay && cachedData.splashMessage) {
-        return res.status(200).send(renderSplashPage(cachedData, target));
-      }
-
-      return res.redirect(target);
     }
 
     // 2. Cache miss, query MongoDB
@@ -895,7 +933,7 @@ exports.redirectUrl = async (req, res) => {
 
     // Emit real-time click event for SSE stream
     if (url.user) {
-      clickEmitter.emit('click', {
+      eventBus.publishClick({
         userId: url.user.toString(),
         shortCode: code,
         title: url.title || url.longUrl,
@@ -903,18 +941,32 @@ exports.redirectUrl = async (req, res) => {
       });
     }
 
-    url.clicks++;
-    url.clickHistory.push(analyticsData);
-     if (url.clickHistory.length > 100) url.clickHistory = url.clickHistory.slice(-100);
-
-    if (url.isOneTime) {
-      url.isActive = false;
-      urlCache.set(code, buildCacheObject(url));
-    } else if (url.maxClicks && url.clicks >= url.maxClicks) {
-      url.isActive = false;
-      urlCache.set(code, buildCacheObject(url));
+    // Atomic click reservation on database path to prevent concurrency races
+    const clickFilter = {
+      _id: url._id,
+      isActive: true,
+      $or: [
+        { maxClicks: null },
+        { maxClicks: { $exists: false } },
+        { $expr: { $lt: ['$clicks', '$maxClicks'] } }
+      ]
+    };
+    const clickUpdate = {
+      $inc: { clicks: 1 },
+      $push: { clickHistory: { $each: [analyticsData], $slice: -100 } },
+      ...(url.isOneTime ? { $set: { isActive: false } } : {})
+    };
+    const updatedUrl = await Url.findOneAndUpdate(clickFilter, clickUpdate, { new: true });
+    if (!updatedUrl) {
+      urlCache.set(code, { ...buildCacheObject(url), isActive: false });
+      if (url.fallbackUrl) return res.redirect(url.fallbackUrl);
+      return res.status(410).send(renderExpiredPage(url, 'This link is no longer available.'));
     }
-    await url.save();
+    if (updatedUrl.maxClicks && updatedUrl.clicks >= updatedUrl.maxClicks) {
+      updatedUrl.isActive = false;
+      await updatedUrl.save();
+    }
+    urlCache.set(code, buildCacheObject(updatedUrl));
 
     if (url.deepLinkScheme) {
       return res.status(200).send(renderDeepLinkPage(url, target));
@@ -954,7 +1006,8 @@ exports.getUserUrls = async (req, res) => {
     const urls = await Url.find(query)
       .sort(sortConfig)
       .skip(skip)
-      .limit(limit);
+      .limit(limit)
+      .lean();
     
     const total = await Url.countDocuments(query);
 
@@ -971,14 +1024,14 @@ exports.getUserUrls = async (req, res) => {
 
 exports.deleteUrl = async (req, res) => {
   try {
-    const url = await Url.findById(req.params.id);
+    const url = req.resource || await Url.findById(req.params.id);
 
     if (!url) {
       return res.status(404).json({ message: "URL not found" });
     }
 
     // Ensure the user owns this URL
-    if (url.user.toString() !== req.user._id.toString()) {
+    if (!url.user || url.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized to delete this URL" });
     }
 
@@ -990,6 +1043,8 @@ exports.deleteUrl = async (req, res) => {
     await AuditLog.create({
       action: "DELETE_URL",
       userEmail: req.user.email,
+      targetUserId: url.user,
+      targetResource: "Url",
       status: "success",
       ipAddress: req.ip,
       details: `Deleted shortCode: ${url.shortCode}`
@@ -1006,19 +1061,25 @@ exports.unlockUrl = async (req, res) => {
   const { password } = req.body;
 
   try {
-    const url = await Url.findOne({ shortCode: code });
+    let url;
+    if (code && code.length === 24 && mongoose.Types.ObjectId.isValid(code)) {
+      url = await Url.findById(code);
+    }
+    if (!url) {
+      url = await Url.findOne({ shortCode: code });
+    }
     if (!url) return res.status(404).json({ message: "URL not found" });
     if (!url.isActive) return res.status(403).json({ message: "Link is disabled", fallbackUrl: url.fallbackUrl });
     if (url.expiresAt && new Date() > new Date(url.expiresAt)) {
       url.isActive = false;
       await url.save();
-      urlCache.set(code, buildCacheObject(url));
+      urlCache.set(url.shortCode, buildCacheObject(url));
       return res.status(410).json({ message: "Link has expired", fallbackUrl: url.fallbackUrl });
     }
     if (url.maxClicks && url.clicks >= url.maxClicks) {
       url.isActive = false;
       await url.save();
-      urlCache.set(code, buildCacheObject(url));
+      urlCache.set(url.shortCode, buildCacheObject(url));
       return res.status(410).json({ message: "Link has reached its maximum click limit", fallbackUrl: url.fallbackUrl });
     }
     if (!url.password) return res.status(400).json({ message: "URL is not password protected" });
@@ -1048,13 +1109,13 @@ exports.unlockUrl = async (req, res) => {
       updatedUrl.isActive = false;
       await updatedUrl.save();
     }
-    urlCache.set(code, buildCacheObject(updatedUrl));
+    urlCache.set(url.shortCode, buildCacheObject(updatedUrl));
 
     // Trigger Webhook Event Asynchronously
     if (url.webhookUrl) {
       triggerWebhook(url.webhookUrl, {
         event: "link.click",
-        shortCode: code,
+        shortCode: url.shortCode,
         longUrl: url.longUrl,
         targetUrl: targetUrl,
         timestamp: new Date().toISOString(),
@@ -1070,14 +1131,14 @@ exports.unlockUrl = async (req, res) => {
 
 exports.toggleUrlStatus = async (req, res) => {
   try {
-    const url = await Url.findById(req.params.id);
+    const url = req.resource || await Url.findById(req.params.id);
 
     if (!url) {
       return res.status(404).json({ message: "URL not found" });
     }
 
     // Ensure ownership
-    if (url.user.toString() !== req.user._id.toString()) {
+    if (!url.user || url.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized to modify this URL" });
     }
 
@@ -1090,6 +1151,8 @@ exports.toggleUrlStatus = async (req, res) => {
     await AuditLog.create({
       action: "TOGGLE_URL_STATUS",
       userEmail: req.user.email,
+      targetUserId: url.user,
+      targetResource: "Url",
       status: "success",
       ipAddress: req.ip,
       details: `Toggled shortCode ${url.shortCode} active state to ${url.isActive}`
@@ -1105,14 +1168,14 @@ exports.editUrl = async (req, res) => {
   const { longUrl, password, expiresAt, ogTitle, ogDescription, ogImage, iphoneUrl, androidUrl, webhookUrl, maxClicks, fallbackUrl, abTestTargets, splashMessage, splashDelay, isOneTime, geoTargets, deepLinkScheme, aiSummary, aiSafetyScore, aiTags } = req.body;
 
   try {
-    const url = await Url.findById(req.params.id);
+    const url = req.resource || await Url.findById(req.params.id);
 
     if (!url) {
       return res.status(404).json({ message: "URL not found" });
     }
 
     // Ensure ownership
-    if (url.user.toString() !== req.user._id.toString()) {
+    if (!url.user || url.user.toString() !== req.user._id.toString()) {
       return res.status(403).json({ message: "Not authorized to edit this URL" });
     }
 
@@ -1256,11 +1319,9 @@ exports.bulkShortenUrl = async (req, res) => {
 
       urlCache.set(shortCode, buildCacheObject(newUrl));
       
-      // Async metadata fetch
+      // Async metadata fetch without clobbering concurrent clicks
       fetchMetadata(longUrl).then(async ({ title, favicon }) => {
-        newUrl.title = title;
-        newUrl.favicon = favicon;
-        await newUrl.save();
+        await Url.updateOne({ _id: newUrl._id }, { $set: { title, favicon } });
         const currentCache = urlCache.get(shortCode);
         if (currentCache) {
           urlCache.set(shortCode, { ...currentCache, title, favicon });
@@ -1308,10 +1369,16 @@ exports.streamClicks = (req, res) => {
     }
   };
 
-  clickEmitter.on('click', handleClick);
+  eventBus.on('click', handleClick);
+
+  // Send periodic SSE comment heartbeat every 25s to keep connections alive across reverse proxies/ELBs
+  const heartbeat = setInterval(() => {
+    res.write(': heartbeat\n\n');
+  }, 25000);
 
   req.on('close', () => {
-    clickEmitter.off('click', handleClick);
+    clearInterval(heartbeat);
+    eventBus.off('click', handleClick);
   });
 };
 
@@ -1335,7 +1402,12 @@ exports.analyzeUrlWithAi = async (req, res) => {
     let textContent = "";
     let pageTitle = "";
     try {
-      const response = await axios.get(longUrl, { timeout: 4000, maxRedirects: 3 });
+      // SECURITY FIX: No redirect following to prevent DNS rebinding attacks
+      const response = await axios.get(longUrl, {
+        timeout: 4000,
+        maxRedirects: 0, // Do NOT follow redirects - prevents SSRF via DNS rebinding
+        maxContentLength: 1024 * 1024 // 1MB max response size
+      });
       const $ = cheerio.load(response.data);
       pageTitle = $("title").text().trim();
       $("script, style, noscript, nav, footer").remove();

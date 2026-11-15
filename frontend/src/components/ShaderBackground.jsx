@@ -8,8 +8,8 @@ const ShaderBackground = () => {
     if (!canvas) return;
 
     function syncSize() {
-      const w = canvas.clientWidth || window.innerWidth;
-      const h = canvas.clientHeight || window.innerHeight;
+      const w = Math.max(canvas.clientWidth || window.innerWidth, 1);
+      const h = Math.max(canvas.clientHeight || window.innerHeight, 1);
       if (canvas.width !== w || canvas.height !== h) {
         canvas.width = w;
         canvas.height = h;
@@ -26,7 +26,12 @@ const ShaderBackground = () => {
     syncSize();
 
     const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-    if (!gl) return;
+    if (!gl) {
+      return () => {
+        if (resizeObserver) resizeObserver.disconnect();
+        else window.removeEventListener('resize', syncSize);
+      };
+    }
 
     const vs = `attribute vec2 a_position;
 varying vec2 v_texCoord;
@@ -43,7 +48,8 @@ uniform vec2 u_mouse;
 void main() {
     vec2 uv = v_texCoord;
     vec2 p = (uv - 0.5) * 2.0;
-    p.x *= u_resolution.x / u_resolution.y;
+    float safeY = max(u_resolution.y, 1.0);
+    p.x *= u_resolution.x / safeY;
 
     float t = u_time * 0.3;
     
@@ -66,8 +72,8 @@ void main() {
     vec3 col3 = vec3(0.1, 0.3, 0.8) * glow3;
 
     // Mouse Tracking Glow
-    vec2 mPos = (u_mouse / u_resolution - 0.5) * 2.0;
-    mPos.x *= u_resolution.x / u_resolution.y;
+    vec2 mPos = (u_mouse / max(u_resolution, vec2(1.0, 1.0)) - 0.5) * 2.0;
+    mPos.x *= u_resolution.x / safeY;
     float distMouse = length(p - mPos);
     float glowMouse = 0.08 / (distMouse + 0.3);
     vec3 colMouse = vec3(0.3, 0.6, 1.0) * glowMouse;
@@ -84,13 +90,39 @@ void main() {
       const s = gl.createShader(type);
       gl.shaderSource(s, src);
       gl.compileShader(s);
+      if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) {
+        gl.deleteShader(s);
+        return null;
+      }
       return s;
     }
 
+    const vsShader = cs(gl.VERTEX_SHADER, vs);
+    const fsShader = cs(gl.FRAGMENT_SHADER, fs);
+    if (!vsShader || !fsShader) {
+      if (vsShader) gl.deleteShader(vsShader);
+      if (fsShader) gl.deleteShader(fsShader);
+      return () => {
+        if (resizeObserver) resizeObserver.disconnect();
+        else window.removeEventListener('resize', syncSize);
+      };
+    }
+
     const prog = gl.createProgram();
-    gl.attachShader(prog, cs(gl.VERTEX_SHADER, vs));
-    gl.attachShader(prog, cs(gl.FRAGMENT_SHADER, fs));
+    gl.attachShader(prog, vsShader);
+    gl.attachShader(prog, fsShader);
     gl.linkProgram(prog);
+
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) {
+      gl.deleteProgram(prog);
+      gl.deleteShader(vsShader);
+      gl.deleteShader(fsShader);
+      return () => {
+        if (resizeObserver) resizeObserver.disconnect();
+        else window.removeEventListener('resize', syncSize);
+      };
+    }
+
     gl.useProgram(prog);
 
     const buf = gl.createBuffer();
@@ -119,7 +151,10 @@ void main() {
     window.addEventListener('mousemove', handleMouseMove);
 
     let animationFrameId;
+    let isPaused = false;
+
     function render(t) {
+      if (isPaused) return;
       if (typeof ResizeObserver === 'undefined') syncSize();
       gl.viewport(0, 0, canvas.width, canvas.height);
       if (uTime) gl.uniform1f(uTime, t * 0.001);
@@ -128,14 +163,34 @@ void main() {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       animationFrameId = requestAnimationFrame(render);
     }
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        isPaused = true;
+        cancelAnimationFrame(animationFrameId);
+      } else {
+        if (isPaused) {
+          isPaused = false;
+          animationFrameId = requestAnimationFrame(render);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
     
     animationFrameId = requestAnimationFrame(render);
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('visibilitychange', handleVisibility);
       if (resizeObserver) resizeObserver.disconnect();
-      window.removeEventListener('resize', syncSize);
+      else window.removeEventListener('resize', syncSize);
       cancelAnimationFrame(animationFrameId);
+      if (gl) {
+        if (buf) gl.deleteBuffer(buf);
+        if (prog) gl.deleteProgram(prog);
+        if (vsShader) gl.deleteShader(vsShader);
+        if (fsShader) gl.deleteShader(fsShader);
+      }
     };
   }, []);
 

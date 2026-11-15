@@ -1,5 +1,9 @@
 const { z } = require('zod');
 
+const emptyToUndefined = (val) => (val === '' ? undefined : val);
+const optionalUrl = z.preprocess(emptyToUndefined, z.string().url().optional());
+const optionalString = z.preprocess(emptyToUndefined, z.string().optional());
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
   PORT: z.coerce.number().int().positive().default(5000),
@@ -7,15 +11,15 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(32),
   CSRF_SECRET: z.string().min(32),
   CORS_ORIGIN: z.string().min(1),
-  PUBLIC_API_URL: z.string().url().optional(),
+  PUBLIC_API_URL: optionalUrl,
   PRIVATE_FILE_BASE_URL: z.string().min(1).default('/api/bio/files'),
   TRUST_PROXY_HOPS: z.coerce.number().int().nonnegative().default(1),
-  REDIS_URL: z.string().optional(),
-  AWS_SECRET_ID: z.string().optional(),
-  AWS_REGION: z.string().optional(),
+  REDIS_URL: optionalString,
+  AWS_SECRET_ID: optionalString,
+  AWS_REGION: optionalString,
   REQUIRE_UPLOAD_SCAN: z.enum(['true', 'false']).default('false'),
-  UPLOAD_DIR: z.string().optional(),
-  CLAMAV_SCANNER_URL: z.string().url().optional()
+  UPLOAD_DIR: optionalString,
+  CLAMAV_SCANNER_URL: optionalUrl
 }).superRefine((config, context) => {
   const origins = config.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean);
   if (origins.length === 0) {

@@ -23,11 +23,32 @@ const upload = multer({
 });
 
 const scanFile = async (buffer) => {
-  if (process.env.CLAMAV_SCANNER_URL) {
-    throw new Error('CLAMAV_SCANNER_URL requires a configured scanning adapter');
+  const requireScan = process.env.REQUIRE_UPLOAD_SCAN === 'true';
+  const scannerUrl = process.env.CLAMAV_SCANNER_URL;
+
+  if (scannerUrl) {
+    try {
+      const axios = require('axios');
+      const response = await axios.post(`${scannerUrl}/scan`, buffer, {
+        headers: { 'Content-Type': 'application/octet-stream' },
+        timeout: 5000,
+        maxBodyLength: MAX_FILE_SIZE
+      });
+      if (response.data && response.data.malwareDetected) {
+        throw new Error('Malicious content detected in uploaded file');
+      }
+    } catch (err) {
+      if (err.message && err.message.includes('Malicious content')) throw err;
+      if (requireScan) {
+        throw new Error(`Upload malware scanner failed: ${err.message}`);
+      }
+      console.warn('Optional ClamAV scanner unavailable, proceeding with verified image format:', err.message);
+    }
+    return;
   }
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Upload malware scanner is not configured');
+
+  if (requireScan) {
+    throw new Error('Upload malware scanner is required by configuration but CLAMAV_SCANNER_URL is not set');
   }
 };
 

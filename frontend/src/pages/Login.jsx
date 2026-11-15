@@ -30,11 +30,19 @@ const Login = () => {
     }
     setResetLoading(true);
     try {
-      // Password reset request simulation / handler
-      await new Promise(r => setTimeout(r, 800));
-      addToast(`Password reset link sent to ${resetEmail}`, "success");
-      setShowForgotModal(false);
-      setResetEmail("");
+      const res = await apiFetch(`${API_URL}/api/auth/password-reset/request`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: resetEmail })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        addToast(data.message || `Password reset link sent to ${resetEmail}`, "success");
+        setShowForgotModal(false);
+        setResetEmail("");
+      } else {
+        addToast(data.message || "Failed to request password reset", "error");
+      }
     } catch (err) {
       console.error("Password reset error:", err);
       addToast("Failed to request password reset", "error");

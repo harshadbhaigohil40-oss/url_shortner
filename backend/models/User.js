@@ -31,15 +31,16 @@ const userSchema = new mongoose.Schema({
   refreshTokens: [String],
   failedLoginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date, default: null },
-  passwordResetTokenHash: { type: String, default: null },
-  passwordResetExpires: { type: Date, default: null },
+  passwordResetTokenHash: { type: String, default: null, select: false },
+  passwordResetExpires: { type: Date, default: null, select: false },
   apiKey: {
     type: String,
     select: false
   },
   apiKeyHash: {
     type: String,
-    select: false
+    select: false,
+    index: true
   },
   apiKeyPrefix: {
     type: String,
@@ -63,6 +64,9 @@ const userSchema = new mongoose.Schema({
   },
   createdAt: { type: Date, default: Date.now }
 });
+
+// Index for querying active reset tokens (NOT TTL - TTL on User would delete the entire user account!)
+userSchema.index({ passwordResetTokenHash: 1, passwordResetExpires: 1 });
 
 userSchema.pre('save', async function(next) {
   if (!this.isModified('password') || !this.password) return next();

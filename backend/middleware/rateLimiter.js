@@ -1,20 +1,50 @@
 const rateLimit = require('express-rate-limit');
 const { RedisStore } = require('rate-limit-redis');
 const { createClient } = require('redis');
+const { ipKeyGenerator } = rateLimit;
 
 const redisUrl = process.env.REDIS_URL;
 let redisClient;
 let redisReady = false;
+let redisConnecting = false;
 
 if (redisUrl) {
   redisClient = createClient({ url: redisUrl });
-  redisClient.on('ready', () => { redisReady = true; });
-  redisClient.on('end', () => { redisReady = false; });
+
+  redisClient.on('ready', () => {
+    redisReady = true;
+    redisConnecting = false;
+  });
+
+  redisClient.on('end', () => {
+    redisReady = false;
+    redisConnecting = false;
+  });
+
   redisClient.on('error', (error) => {
     redisReady = false;
     console.error(JSON.stringify({ event: 'redis_rate_limit_error', message: error.message }));
   });
-  redisClient.connect().catch(() => { redisReady = false; });
+
+  redisClient.on('reconnecting', () => {
+    redisConnecting = true;
+  });
+
+  // Initial connection with reconnection logic
+  const connectWithRetry = async () => {
+    if (redisConnecting) return;
+    redisConnecting = true;
+    try {
+      await redisClient.connect();
+    } catch (error) {
+      redisReady = false;
+      redisConnecting = false;
+      // Retry connection after 5 seconds
+      setTimeout(connectWithRetry, 5000);
+    }
+  };
+
+  connectWithRetry();
 }
 
 const createStore = (name) => redisClient
@@ -74,6 +104,41 @@ const shortenLimiter = createLimiter('shorten', 15 * 60 * 1000, 30, 'Too many UR
 const unlockLimiter = createLimiter('unlock', 15 * 60 * 1000, 20, 'Too many unlock attempts, please try again later');
 const analysisLimiter = createLimiter('ai-analysis', 15 * 60 * 1000, 10, 'Too many analysis requests, please try again later');
 
+// Rate limiter that applies different limits for authenticated vs unauthenticated users
+const separateAuthRateLimiter = (windowMs, authenticatedMax, unauthenticatedMax, message) => {
+  return rateLimit({
+    windowMs,
+    max: (req) => req.user ? authenticatedMax : unauthenticatedMax,
+    standardHeaders: false,
+    legacyHeaders: false,
+    keyGenerator: ipKeyGenerator,
+    handler: (req, res) => {
+      securityViolation('separate-auth', req);
+      res.status(429).json({ message });
+    }
+  });
+};
+
+// Per-link rate limiting for unlock endpoint - prevents brute-force attacks on specific protected links
+const perLinkUnlockLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10, // 10 attempts per link per IP/user per 15 minutes
+  standardHeaders: false,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    const { code } = req.params;
+    if (!code) return 'unknown';
+    const ipKey = ipKeyGenerator(req);
+    return req.user
+      ? `perlink-unlock:${req.user._id}:${code}`
+      : `perlink-unlock-ip:${ipKey}:${code}`;
+  },
+  handler: (req, res) => {
+    securityViolation('per-link-unlock', req);
+    res.status(429).json({ message: 'Too many attempts on this specific link, please try again later' });
+  }
+});
+
 const enforceApiKeyRateLimit = async (user, req, res, next) => {
   const limit = Math.max(1, Number(user.apiKeyRateLimit) || 1000);
   if (!redisClient || !redisReady) {
@@ -103,6 +168,9 @@ module.exports = {
   shortenLimiter,
   unlockLimiter,
   analysisLimiter,
+  perLinkUnlockLimiter,
+  separateAuthRateLimiter,
   enforceApiKeyRateLimit,
-  redisStatus: () => ({ configured: !!redisClient, ready: redisReady })
+  redisStatus: () => ({ configured: !!redisClient, ready: redisReady }),
+  redisClient
 };

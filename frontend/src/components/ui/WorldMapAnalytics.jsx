@@ -59,9 +59,9 @@ export default function WorldMapAnalytics({ clickHistory = [] }) {
   };
 
   return (
-    <div className="bg-surface/ border border-border-glass rounded-3xl p-6 shadow-2xl backdrop-blur-xl space-y-6">
+    <div className="bg-surface/80 border border-border-glass rounded-3xl p-6 shadow-2xl backdrop-blur-xl space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border-glass/ pb-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border-glass/40 pb-4">
         <div>
           <h3 className="text-lg font-extrabold text-on-surface flex items-center gap-2">
             <Globe className="w-5 h-5 text-indigo-400 animate-pulse" />
@@ -79,7 +79,7 @@ export default function WorldMapAnalytics({ clickHistory = [] }) {
       </div>
 
       {/* SVG Interactive Map Grid */}
-      <div className="relative bg-background/ rounded-2xl p-4 border border-border-glass/ overflow-hidden min-h-[260px] flex items-center justify-center">
+      <div className="relative bg-background/80 rounded-2xl p-4 border border-border-glass/30 overflow-hidden min-h-[260px] flex items-center justify-center">
         <svg viewBox="0 0 900 450" className="w-full h-auto max-h-[300px] transition-all">
           {/* Map Grid Lines */}
           <g stroke="rgba(255, 255, 255, 0.03)" strokeWidth="1" strokeDasharray="4 4">

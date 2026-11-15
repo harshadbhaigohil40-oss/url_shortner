@@ -5,7 +5,7 @@ import {
   Sparkles, CheckCircle2, Share2 
 } from 'lucide-react';
 
-import { API_URL } from '../utils/api';
+import { API_URL, apiFetch } from '../utils/api';
 import { useToast } from '../context/ToastContextInstance';
 
 const themeStyles = {
@@ -62,7 +62,7 @@ export default function BioView() {
   const fetchBioData = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await fetch(`${API_URL}/api/bio/public/${slug}`);
+      const res = await apiFetch(`${API_URL}/api/bio/public/${slug}`);
       if (!res.ok) {
         throw new Error(res.status === 404 ? 'Bio page not found' : 'Failed to load page');
       }
@@ -80,8 +80,12 @@ export default function BioView() {
   }, [fetchBioData]);
 
   const handleLinkClick = async (linkId, targetUrl) => {
+    if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+      addToast('Invalid link target URL', 'error');
+      return;
+    }
     try {
-      fetch(`${API_URL}/api/bio/public/${slug}/click/${linkId}`, { method: 'POST' }).catch((err) => {
+      apiFetch(`${API_URL}/api/bio/public/${slug}/click/${linkId}`, { method: 'POST' }).catch((err) => {
         console.warn('Bio link click tracking suppressed:', err);
       });
     } catch (err) {
@@ -130,6 +134,7 @@ export default function BioView() {
 
   const currentTheme = themeStyles[data.theme] || themeStyles.glassmorphism;
   const social = data.socialLinks || {};
+  const avatarSrc = data.avatarUrl ? (data.avatarUrl.startsWith('http') || data.avatarUrl.startsWith('data:') ? data.avatarUrl : `${API_URL}${data.avatarUrl}`) : null;
 
   return (
     <div className={`min-h-screen ${currentTheme.bg} flex flex-col items-center px-4 py-12 transition-all duration-500 relative overflow-x-hidden`}>
@@ -144,9 +149,9 @@ export default function BioView() {
 
       <div className="w-full max-w-md flex flex-col items-center text-center">
         {/* Avatar */}
-        {data.avatarUrl ? (
+        {avatarSrc ? (
           <img 
-            src={data.avatarUrl} 
+            src={avatarSrc} 
             alt={data.title} 
             className={`w-28 h-28 rounded-full object-cover mb-5 ${currentTheme.avatarBorder} transition-transform hover:scale-105 duration-300`}
             onError={(e) => { e.target.style.display = 'none'; }}

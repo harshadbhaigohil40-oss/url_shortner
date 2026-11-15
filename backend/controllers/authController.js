@@ -5,26 +5,24 @@ const crypto = require("crypto");
 const bcrypt = require("bcryptjs");
 const { hashApiKey } = require('../utils/security');
 const { OAuth2Client } = require("google-auth-library");
+const { KEY_RING, verifyToken: verifyJwt } = require("../config/jwt-keyring");
 const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-const getJwtSecret = () => {
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
-  return process.env.JWT_SECRET;
-};
-
 const generateAccessToken = (id) => {
-  return jwt.sign({ id }, getJwtSecret(), {
-    expiresIn: "15m", // Short lived
+  return jwt.sign({ id, type: 'active' }, KEY_RING.active.secret, {
+    expiresIn: '15m',
+    keyid: KEY_RING.active.kid,
+    algorithm: 'HS256'
   });
 };
 
-const generateRefreshToken = (id) => jwt.sign({ id, type: 'refresh' }, getJwtSecret(), { expiresIn: '7d' });
+const generateRefreshToken = (id) => jwt.sign({ id, type: 'refresh' }, KEY_RING.active.secret, { expiresIn: '7d', keyid: KEY_RING.active.kid, algorithm: 'HS256' });
 const hashToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const cookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: process.env.NODE_ENV === 'production' ? 'strict' : 'lax',
-  path: '/api/auth',
+  path: '/api',
   maxAge: 7 * 24 * 60 * 60 * 1000
 };
 const clearCookieOptions = { ...cookieOptions, maxAge: undefined, expires: new Date(0) };
@@ -100,19 +98,45 @@ exports.loginUser = async (req, res) => {
 };
 
 exports.googleAuth = async (req, res) => {
-  const { accessToken } = req.body;
-  if (!accessToken) {
-    return res.status(400).json({ message: "No access token provided" });
+  const { accessToken, idToken } = req.body;
+  if (!accessToken && !idToken) {
+    return res.status(400).json({ message: "No Google token provided" });
   }
 
   try {
-    // Verify access token by fetching user profile
-    const axios = require('axios');
-    const response = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
-      headers: { Authorization: `Bearer ${accessToken}` }
-    });
-    
-    const { email, sub: googleId } = response.data;
+    let email;
+    let googleId;
+
+    if (idToken) {
+      const ticket = await client.verifyIdToken({
+        idToken,
+        audience: process.env.GOOGLE_CLIENT_ID
+      });
+      const payload = ticket.getPayload();
+      if (!payload.email_verified) {
+        return res.status(403).json({ message: "Google account email is not verified" });
+      }
+      email = payload.email;
+      googleId = payload.sub;
+    } else {
+      // Verify access token by fetching user profile
+      const axios = require('axios');
+      const response = await axios.get("https://www.googleapis.com/oauth2/v3/userinfo", {
+        headers: { Authorization: `Bearer ${accessToken}` },
+        timeout: 5000
+      });
+
+      if (!response.data || (!response.data.email_verified && response.data.email_verified !== 'true')) {
+        return res.status(403).json({ message: "Google account email is not verified" });
+      }
+
+      email = response.data.email;
+      googleId = response.data.sub;
+    }
+
+    if (!email) {
+      return res.status(400).json({ message: "Google user profile did not provide an email" });
+    }
 
     let user = await User.findOne({ email });
 
@@ -153,7 +177,7 @@ exports.refreshToken = async (req, res) => {
   const refreshToken = cookies.jwt;
   
   try {
-    const decoded = jwt.verify(refreshToken, getJwtSecret());
+    const decoded = verifyJwt(refreshToken);
     const user = await User.findById(decoded.id).select("-password");
     if (!user) return res.status(401).json({ message: "Unauthorized" });
 
@@ -172,12 +196,7 @@ exports.refreshToken = async (req, res) => {
     // network race conditions from falsely triggering the "Token reuse" trap.
     // The existing refresh token remains valid until it expires.
 
-    res.cookie('jwt', refreshToken, {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'lax',
-      maxAge: 7 * 24 * 60 * 60 * 1000
-    });
+    res.cookie('jwt', refreshToken, cookieOptions);
 
     res.json({
       _id: user._id,
@@ -195,7 +214,7 @@ exports.logoutUser = async (req, res) => {
   if (cookies?.jwt) {
     const refreshToken = cookies.jwt;
     try {
-      const decoded = jwt.verify(refreshToken, getJwtSecret());
+      const decoded = verifyJwt(refreshToken);
       const user = await User.findById(decoded.id);
       if (user) {
         user.refreshTokens = user.refreshTokens.filter(t => t !== hashToken(refreshToken));

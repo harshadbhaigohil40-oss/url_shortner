@@ -1,8 +1,10 @@
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 // Vercel loads this file directly, so production configuration must be loaded here.
 const { loadProductionSecrets } = require('./config/secrets');
 const { loadEnv } = require('./config/env');
+const logger = require('./utils/logger');
 
 const configurationReady = loadProductionSecrets()
   .then(() => loadEnv())
@@ -27,7 +29,6 @@ const { doubleCsrf } = require('csrf-csrf');
 const morgan = require('morgan');
 const pinoHttp = require('pino-http');
 const crypto = require('crypto');
-const logger = require('./utils/logger');
 const { globalLimiter } = require('./middleware/rateLimiter');
 
 const urlRoutes = require('./routes/urlRoutes');
@@ -78,14 +79,70 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "ws:", "wss:"],
     }
-  }
+  },
+  // HSTS: Force HTTPS for 1 year, include subdomains, enable preload
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true
+  },
+  // Additional security headers
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
+  permissionsPolicy: {
+    features: {
+      camera: [], microphone: [], geolocation: [], payment: []
+    }
+  },
+  crossOriginEmbedderPolicy: true,
+  crossOriginOpenerPolicy: { policy: 'same-origin' },
+  crossOriginResourcePolicy: { policy: 'same-origin' },
+  originAgentCluster: true,
+  xContentTypeOptions: true,
+  xDnsPrefetchControl: { allow: false },
+  xDownloadOptions: true,
+  xFrameOptions: { action: 'deny' },
+  xPermittedCrossDomainPolicies: { permittedPolicies: 'none' },
+  xXssProtection: true
 }));
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim()).filter(Boolean)
   : ['http://localhost:5173'];
+
+// Helper to match origin against allowed list with wildcard subdomain support
+const isOriginAllowed = (origin) => {
+  if (!origin) return true; // Allow non-browser clients (curl, Postman, server-to-server)
+
+  // Direct match
+  if (allowedOrigins.includes(origin)) return true;
+
+  // Wildcard subdomain support (e.g., "*.example.com")
+  try {
+    const originUrl = new URL(origin);
+    const originHost = originUrl.hostname;
+
+    for (const allowed of allowedOrigins) {
+      const allowedUrl = new URL(allowed);
+      const allowedHost = allowedUrl.hostname;
+
+      // Check for wildcard subdomain
+      if (allowedHost.startsWith('*.')) {
+        const baseDomain = allowedHost.slice(2);
+        if (originHost === baseDomain || originHost.endsWith('.' + baseDomain)) {
+          // Ensure protocol matches for security
+          if (originUrl.protocol === allowedUrl.protocol) return true;
+        }
+      }
+    }
+  } catch {
+    // Invalid URL format, deny
+  }
+
+  return false;
+};
+
 app.use(cors({
   origin: (origin, callback) => {
-    if (!origin || allowedOrigins.includes(origin)) {
+    if (isOriginAllowed(origin)) {
       callback(null, true);
     } else {
       const err = new Error('Not allowed by CORS');
@@ -124,7 +181,14 @@ const { doubleCsrfProtection, generateCsrfToken } = doubleCsrf({
   size: 64,
   getTokenFromRequest: (req) => req.headers["x-csrf-token"],
   ignoredMethods: ["GET", "HEAD", "OPTIONS"],
-  getSessionIdentifier: (req) => "stateless",
+  // Bind CSRF token to user session (JWT user ID or IP for anonymous)
+  // This prevents token reuse across different user sessions
+  getSessionIdentifier: (req) => {
+    // Use authenticated user ID if available
+    if (req.user?.id) return `user:${req.user.id}`;
+    // Fallback to IP for anonymous requests (rate limited anyway)
+    return `anon:${req.ip}`;
+  },
 });
 
 // API-key authentication is applied by protected routes. CSRF remains required for
@@ -186,7 +250,14 @@ const swaggerOptions = {
 const swaggerDocs = swaggerJsdoc(swaggerOptions);
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 
-// Routes
+// Routes - API v1 with versioning
+const API_VERSION = process.env.API_VERSION || 'v1';
+app.use(`/api/${API_VERSION}/auth`, authRoutes);
+app.use(`/api/${API_VERSION}/admin`, adminRoutes);
+app.use(`/api/${API_VERSION}/bio`, bioRoutes);
+app.use(`/api/${API_VERSION}`, urlRoutes);
+
+// Legacy routes for backward compatibility (can be removed after migration period)
 app.use('/api/auth', authRoutes);
 app.use('/api/admin', adminRoutes);
 app.use('/api/bio', bioRoutes);
@@ -206,27 +277,55 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+const isServerless = process.env.VERCEL === '1' || process.env.AWS_LAMBDA_FUNCTION_NAME !== undefined;
+
 let server;
-if (process.env.NODE_ENV !== 'production') {
+if (!isServerless) {
   server = app.listen(PORT, () => {
-    logger.info({ port: PORT }, 'Server running');
+    logger.info({ port: PORT, env: process.env.NODE_ENV || 'development' }, 'Server running');
   });
 
-  const gracefulShutdown = () => {
-    console.log('Received kill signal, shutting down gracefully');
+  server.on('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      logger.error(`Port ${PORT} is already in use by another process. Please close the process using port ${PORT} or change PORT in .env.`);
+    } else {
+      logger.error({ err }, 'Server listen error');
+    }
+    process.exit(1);
+  });
+
+  const gracefulShutdown = async (signal) => {
+    logger.info({ signal }, 'Received shutdown signal, shutting down gracefully');
     if (server) {
-      server.close(() => {
-        console.log('Closed out remaining connections');
-        mongoose.connection.close(false).then(() => {
-          console.log('MongoDB connection closed');
-          process.exit(0);
-        });
+      server.close(async () => {
+        logger.info('Closed out remaining HTTP connections');
+        // Close Redis and EventBus connections if configured
+        try {
+          const eventBus = require('./utils/eventBus');
+          await eventBus.close();
+          const { redisClient } = require('./middleware/rateLimiter');
+          if (redisClient && redisClient.isOpen) {
+            await redisClient.quit();
+            logger.info('Redis connection closed');
+          }
+        } catch (err) {
+          logger.error({ err }, 'Error closing Redis/EventBus connections');
+        }
+        await mongoose.connection.close(false);
+        logger.info('MongoDB connection closed');
+        process.exit(0);
       });
+
+      // Force exit after 10 seconds if connections refuse to close
+      setTimeout(() => {
+        logger.fatal('Graceful shutdown timed out, forcing exit');
+        process.exit(1);
+      }, 10000).unref();
     }
   };
 
-  process.on('SIGTERM', gracefulShutdown);
-  process.on('SIGINT', gracefulShutdown);
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 module.exports = app;

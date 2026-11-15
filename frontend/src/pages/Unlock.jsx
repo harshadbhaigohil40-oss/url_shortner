@@ -27,9 +27,13 @@ const Unlock = () => {
       });
       const data = await res.json();
 
-      if (res.ok) {
-        // Redirect to the long URL
-        window.location.href = data.longUrl;
+      if (res.ok && data.longUrl) {
+        // Guard against javascript: pseudo-protocol XSS
+        if (/^https?:\/\//i.test(data.longUrl) || /^[a-z][a-z0-9+.-]*:\/\//i.test(data.longUrl)) {
+          window.location.href = data.longUrl;
+        } else {
+          setError("Invalid redirect destination URL");
+        }
       } else {
         setError(data.message || "Incorrect password");
       }

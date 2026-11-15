@@ -127,7 +127,8 @@ const Home = () => {
         throw new Error(errorMsg);
       }
       
-      setShortUrl(`${API_URL}/${data.shortCode}`);
+      const fullShortUrl = `${API_URL || window.location.origin}/${data.shortCode}`;
+      setShortUrl(fullShortUrl);
       // Reset form
       setCustomAlias("");
       setPassword("");
@@ -745,7 +746,7 @@ const Home = () => {
                     ) : (
                       <div className="flex items-center gap-3">
                         <a 
-                          href={`${API_URL}/${result.shortCode}`} 
+                          href={`${API_URL || window.location.origin}/${result.shortCode}`} 
                           target="_blank" 
                           rel="noopener noreferrer"
                           className="text-primary font-semibold hover:underline"
@@ -754,7 +755,7 @@ const Home = () => {
                         </a>
                         <button 
                           onClick={() => {
-                            navigator.clipboard.writeText(`${API_URL}/${result.shortCode}`)
+                            navigator.clipboard.writeText(`${API_URL || window.location.origin}/${result.shortCode}`)
                               .then(() => addToast("Copied to clipboard!", "success"))
                               .catch(() => addToast("Unable to copy the URL.", "error"));
                           }}

@@ -1,4 +1,4 @@
-import React, { lazy, Suspense, useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect, useCallback } from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import { ThemeProvider } from './context/ThemeContext';
@@ -42,10 +42,10 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [showPreloader]);
 
-  const handlePreloaderComplete = () => {
+  const handlePreloaderComplete = useCallback(() => {
     setShowPreloader(false);
     window.scrollTo(0, 0); // Reset scroll position for main app
-  };
+  }, []);
 
   return (
     <GoogleOAuthProvider clientId={import.meta.env.VITE_GOOGLE_CLIENT_ID || "fallback_client_id"}>

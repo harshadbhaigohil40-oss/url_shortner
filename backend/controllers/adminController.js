@@ -2,6 +2,8 @@ const User = require("../models/User");
 const Url = require("../models/Url");
 const AuditLog = require("../models/AuditLog");
 
+const escapeRegex = (string) => string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
 exports.getAdminStats = async (req, res) => {
   try {
     const totalUsers = await User.countDocuments();
@@ -16,7 +18,8 @@ exports.getAdminStats = async (req, res) => {
     const urlPage = parseInt(req.query.urlPage) || 1;
     const urlLimit = parseInt(req.query.urlLimit) || 20;
     const urlSkip = (urlPage - 1) * urlLimit;
-    const search = req.query.search ? req.query.search.trim() : "";
+    const rawSearch = req.query.search ? req.query.search.trim() : "";
+    const search = rawSearch ? escapeRegex(rawSearch) : "";
 
     let urlFilter = {};
     if (search) {

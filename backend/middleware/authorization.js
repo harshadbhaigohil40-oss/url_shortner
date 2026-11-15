@@ -39,7 +39,6 @@ const hasPermission = (user, permission) => {
 
 const isOwnerOrAdmin = (user, resource, ownerField = 'user') => {
   if (!user || !resource) return false;
-  if (user.role === 'admin') return true;
   const owner = resource[ownerField]?._id || resource[ownerField];
   return String(owner) === String(user._id);
 };

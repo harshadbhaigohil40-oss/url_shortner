@@ -18,6 +18,7 @@ import WorldMapAnalytics from "../components/ui/WorldMapAnalytics";
 const Dashboard = () => {
   const { user, login, logout } = useContext(AuthContext);
   const navigate = useNavigate();
+  const getShortUrl = (code) => `${API_URL || window.location.origin}/${code}`;
   const [urls, setUrls] = useState([]);
   const [loading, setLoading] = useState(true);
   const [apiKey, setApiKey] = useState("");
@@ -134,6 +135,66 @@ const Dashboard = () => {
   }, [user, navigate, page, debouncedSearch, sortBy, order, login, logout, refreshKey]);
 
   const { addToast } = useToast();
+
+  // Real-time SSE click notifications & live stats update
+  useEffect(() => {
+    if (!user || !user.token) return;
+
+    let eventSource = null;
+    let reconnectTimeout = null;
+
+    const connectSSE = () => {
+      try {
+        const streamUrl = `${API_URL}/api/stream-clicks?token=${encodeURIComponent(user.token)}`;
+        eventSource = new EventSource(streamUrl);
+
+        eventSource.onmessage = (event) => {
+          if (!event.data) return;
+          try {
+            const clickData = JSON.parse(event.data);
+            if (clickData.shortCode) {
+              setUrls((prevUrls) =>
+                prevUrls.map((u) =>
+                  u.shortCode === clickData.shortCode
+                    ? { ...u, clicks: (u.clicks || 0) + 1 }
+                    : u
+                )
+              );
+              setStats((prevStats) =>
+                prevStats
+                  ? { ...prevStats, totalClicks: (prevStats.totalClicks || 0) + 1 }
+                  : prevStats
+              );
+              addToast(
+                `⚡ Real-time click on "${clickData.title || clickData.shortCode}" (${clickData.analytics?.country || 'Global'})`,
+                'info'
+              );
+            }
+          } catch {
+            // Ignore non-JSON frames like heartbeats
+          }
+        };
+
+        eventSource.onerror = () => {
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          // Reconnect with 10s backoff
+          reconnectTimeout = setTimeout(connectSSE, 10000);
+        };
+      } catch (err) {
+        console.warn('SSE connection error:', err);
+      }
+    };
+
+    connectSSE();
+
+    return () => {
+      if (reconnectTimeout) clearTimeout(reconnectTimeout);
+      if (eventSource) eventSource.close();
+    };
+  }, [user, addToast]);
 
   const downloadQR = (shortCode) => {
     const canvas = document.getElementById(`qr-${shortCode}`);
@@ -386,7 +447,7 @@ const Dashboard = () => {
     urls.forEach(url => {
       const row = [
         `"${url.longUrl}"`,
-        `"${API_URL}/${url.shortCode}"`,
+        `"${getShortUrl(url.shortCode)}"`,
         url.clicks,
         `"${url.title || ''}"`,
         `"${new Date(url.createdAt).toLocaleDateString()}"`
@@ -823,7 +884,7 @@ const Dashboard = () => {
                           <div className="flex items-center gap-2 group">
                             <a 
                               className="text-primary font-semibold hover:underline flex items-center gap-1" 
-                              href={`${API_URL}/${url.shortCode}`} 
+                              href={getShortUrl(url.shortCode)} 
                               target="_blank" 
                               rel="noopener noreferrer"
                             >
@@ -832,7 +893,7 @@ const Dashboard = () => {
                               <span>{url.shortCode}</span>
                             </a>
                             <button 
-                              onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                              onClick={() => copyToClipboard(getShortUrl(url.shortCode))}
                               className="material-symbols-outlined text-[18px] text-on-surface-variant hover:text-primary active:scale-90 transition-colors"
                               title="Copy URL"
                               aria-label="Copy short URL"
@@ -873,7 +934,7 @@ const Dashboard = () => {
                               edit
                             </button>
                             <button 
-                              onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                              onClick={() => copyToClipboard(getShortUrl(url.shortCode))}
                               className="material-symbols-outlined text-on-surface-variant p-2 rounded-lg hover:bg-surface-container-highest hover:text-primary transition-colors"
                               aria-label="Copy URL"
                               title="Copy URL"
@@ -1007,7 +1068,7 @@ const Dashboard = () => {
                                   <div className="w-32 h-32 bg-white p-2 rounded-lg mx-auto shadow-lg shadow-black/50">
                                     <QRCodeCanvas 
                                       id={`qr-${url.shortCode}`} 
-                                      value={`${API_URL}/${url.shortCode}`} 
+                                      value={getShortUrl(url.shortCode)} 
                                       size={112} 
                                       className="w-full h-full" 
                                       fgColor={qrFgColor}
@@ -1073,21 +1134,21 @@ const Dashboard = () => {
                                   <p className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-widest">Share Link</p>
                                   <div className="flex flex-wrap justify-center gap-4">
                                     <button 
-                                      onClick={() => shareOnSocial('twitter', `${API_URL}/${url.shortCode}`)}
+                                      onClick={() => shareOnSocial('twitter', getShortUrl(url.shortCode))}
                                       className="w-12 h-12 rounded-full bg-surface-container-highest border border-border-glass flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all duration-300"
                                       title="Share on X"
                                     >
                                       <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"></path></svg>
                                     </button>
                                     <button 
-                                      onClick={() => shareOnSocial('facebook', `${API_URL}/${url.shortCode}`)}
+                                      onClick={() => shareOnSocial('facebook', getShortUrl(url.shortCode))}
                                       className="w-12 h-12 rounded-full bg-surface-container-highest border border-border-glass flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all duration-300"
                                       title="Share on Facebook"
                                     >
                                       <svg className="w-5 h-5 fill-current" viewBox="0 0 24 24"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"></path></svg>
                                     </button>
                                     <button 
-                                      onClick={() => shareOnSocial('linkedin', `${API_URL}/${url.shortCode}`)}
+                                      onClick={() => shareOnSocial('linkedin', getShortUrl(url.shortCode))}
                                       className="w-12 h-12 rounded-full bg-surface-container-highest border border-border-glass flex items-center justify-center hover:bg-primary/20 hover:text-primary transition-all duration-300"
                                       title="Share on LinkedIn"
                                     >
@@ -1123,7 +1184,7 @@ const Dashboard = () => {
                         <div className="flex flex-wrap items-center gap-2">
                           <a 
                             className="text-primary font-semibold hover:underline flex items-center gap-1" 
-                            href={`${API_URL}/${url.shortCode}`} 
+                            href={getShortUrl(url.shortCode)} 
                             target="_blank" 
                             rel="noopener noreferrer"
                           >
@@ -1135,7 +1196,7 @@ const Dashboard = () => {
                             {url.isActive ? 'Active' : 'Paused'}
                           </span>
                           <button 
-                            onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                            onClick={() => copyToClipboard(getShortUrl(url.shortCode))}
                             className="material-symbols-outlined text-[18px] text-on-surface-variant active:scale-90"
                           >
                             content_copy
@@ -1189,7 +1250,7 @@ const Dashboard = () => {
                           className="!px-2 !py-1 text-label-sm h-auto"
                           icon="content_copy"
                           aria-label="Copy URL"
-                          onClick={() => copyToClipboard(`${API_URL}/${url.shortCode}`)}
+                          onClick={() => copyToClipboard(getShortUrl(url.shortCode))}
                         >
                           Copy
                         </Button>
@@ -1218,7 +1279,7 @@ const Dashboard = () => {
                           <div className="w-32 h-32 bg-white p-2 rounded-lg mx-auto shadow-lg mb-2">
                             <QRCodeCanvas 
                               id={`qr-mobile-${url.shortCode}`} 
-                              value={`${API_URL}/${url.shortCode}`} 
+                              value={getShortUrl(url.shortCode)} 
                               size={112} 
                               className="w-full h-full"
                               fgColor={qrFgColor}

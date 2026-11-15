@@ -168,9 +168,39 @@ exports.trackLinkClick = async (req, res) => {
     const { slug, linkId } = req.params;
     const cleanSlug = slug.toLowerCase().trim();
 
+    // Get referer and country for analytics
+    let referer = "Direct / Email";
+    const rawReferer = req.headers['referer'] || req.headers['referrer'];
+    if (rawReferer) {
+      try {
+        const urlObj = new URL(rawReferer);
+        referer = urlObj.hostname.replace('www.', '');
+      } catch {
+        referer = rawReferer;
+      }
+    }
+
+    // Get client IP for geo lookup
+    let country = "Unknown";
+    const geoip = require("geoip-lite");
+    let ip = req.ip || req.socket.remoteAddress || "";
+    if (ip.startsWith('::ffff:')) ip = ip.replace('::ffff:', '');
+    const geo = geoip.lookup(ip);
+    if (geo) country = geo.country;
+
+    // Increment click count and add to click history (with slice to limit)
+    const clickHistoryEntry = {
+      timestamp: new Date(),
+      referer,
+      country
+    };
+
     await BioPage.updateOne(
       { slug: cleanSlug, "links._id": linkId },
-      { $inc: { "links.$.clicks": 1 } }
+      {
+        $inc: { "links.$.clicks": 1 },
+        $push: { "links.$.clickHistory": { $each: [clickHistoryEntry], $slice: -100 } }
+      }
     );
 
     bioCache.delete(cleanSlug);

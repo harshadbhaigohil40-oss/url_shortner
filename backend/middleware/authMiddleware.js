@@ -1,16 +1,11 @@
-const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { hashApiKey } = require('../utils/security');
 const { enforceApiKeyRateLimit } = require('./rateLimiter');
+const { verifyToken: verifyJwt } = require('../config/jwt-keyring');
 
 const apiKeyRateLimit = (req, res, next) => {
   if (req.authMethod !== 'api-key' || !req.user) return next();
   return enforceApiKeyRateLimit(req.user, req, res, next);
-};
-
-const getJwtSecret = () => {
-  if (!process.env.JWT_SECRET) throw new Error('JWT_SECRET is required');
-  return process.env.JWT_SECRET;
 };
 
 const protect = async (req, res, next) => {
@@ -19,22 +14,29 @@ const protect = async (req, res, next) => {
   let token = null;
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
     token = req.headers.authorization.split(" ")[1];
+  } else if (req.query?.token) {
+    token = req.query.token;
   }
 
-  // 1. Check for JWT Bearer token
+  // 1. Check for JWT Bearer token first (takes priority if present)
   if (token) {
     try {
-      const decoded = jwt.verify(token, getJwtSecret());
+      const decoded = verifyJwt(token);
       req.user = await User.findById(decoded.id).select("-password");
       if (req.user) {
+        req.authMethod = 'jwt';
         return next();
       }
+      return res.status(401).json({ message: "Not authorized, user not found" });
     } catch (error) {
-      console.warn("JWT authentication failed; falling back to API key if present", { code: error.name });
+      // JWT verification failed
+      // SECURITY: Do NOT fall through to API key - this prevents brute-force attacks
+      // from using failed JWT attempts to probe API key authentication
+      return res.status(401).json({ message: "Not authorized, invalid or expired token" });
     }
   }
 
-  // 2. Check for API key (via x-api-key header)
+  // 2. Check for API key (only if no Bearer token was provided)
   if (apiKey) {
     try {
       const user = await User.findOne({ apiKeyHash: hashApiKey(apiKey) }).select("-password +apiKeyHash");
@@ -66,11 +68,13 @@ const optionalProtect = async (req, res, next) => {
   let token = null;
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
     token = req.headers.authorization.split(" ")[1];
+  } else if (req.query?.token) {
+    token = req.query.token;
   }
 
   if (token) {
     try {
-      const decoded = jwt.verify(token, getJwtSecret());
+      const decoded = verifyJwt(token);
       req.user = await User.findById(decoded.id).select("-password");
       if (req.user) return next();
     } catch (error) {

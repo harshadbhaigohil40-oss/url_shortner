@@ -91,7 +91,7 @@ export default function BioPageList({ onCreateNew, onEdit }) {
       </div>
 
       {bioPages.length === 0 ? (
-        <div className="p-12 text-center rounded-2xl bg-surface/ border border-border-glass text-text-muted space-y-4">
+        <div className="p-12 text-center rounded-2xl bg-surface-container/60 backdrop-blur-md border border-border-glass text-text-muted space-y-4">
           <Sparkles className="w-12 h-12 text-purple-400/50 mx-auto" />
           <h3 className="text-base font-bold text-on-surface">No Bio Pages Created Yet</h3>
           <p className="text-xs max-w-sm mx-auto">Build your first custom link-in-bio page with glassmorphic themes, social icons, and sub-link click tracking.</p>
@@ -106,7 +106,7 @@ export default function BioPageList({ onCreateNew, onEdit }) {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {bioPages.map((page) => (
-            <div key={page._id} className="bg-surface/ border border-border-glass rounded-2xl p-5 hover:border-purple-500/40 transition-all shadow-xl flex flex-col justify-between">
+            <div key={page._id} className="bg-surface-container/60 backdrop-blur-md border border-border-glass rounded-2xl p-5 hover:border-purple-500/40 transition-all shadow-xl flex flex-col justify-between">
               <div>
                 <div className="flex items-center justify-between mb-3">
                   <span className="px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider bg-purple-500/20 text-purple-300 border border-purple-500/30">

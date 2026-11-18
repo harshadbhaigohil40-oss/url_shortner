@@ -13,7 +13,7 @@ class EventBus extends EventEmitter {
   }
 
   async initRedis() {
-    const redisUrl = process.env.REDIS_URL;
+    const redisUrl = process.env.NODE_ENV === 'production' ? process.env.REDIS_URL : undefined;
     if (!redisUrl) return;
 
     try {

@@ -7,6 +7,9 @@ import { ToastProvider } from './components/Toast';
 import ProtectedRoute from './components/ProtectedRoute';
 import Navbar from './components/Navbar';
 import PageLoader from './components/PageLoader';
+import ScrollProgress from './components/ScrollProgress';
+import ErrorBoundary from './components/ErrorBoundary';
+import SkipLink from './components/SkipLink';
 
 // Lazy load route pages for bundle size optimization
 const Home = lazy(() => import('./pages/Home'));
@@ -25,6 +28,25 @@ const SimpleLoader = () => (
       <p className="text-sm font-medium text-text-muted tracking-wide">Loading...</p>
     </div>
   </div>
+);
+
+// Route-level error boundaries for graceful degradation
+const HomeWithBoundary = () => (
+  <ErrorBoundary fallback={<div className="min-h-screen flex items-center justify-center p-4"><div className="text-center"><h2 className="text-xl font-semibold mb-2">Unable to load homepage</h2><p className="text-text-muted">Please refresh the page or try again later.</p></div></div>}>
+    <Home />
+  </ErrorBoundary>
+);
+
+const DashboardWithBoundary = () => (
+  <ErrorBoundary fallback={<div className="min-h-screen flex items-center justify-center p-4"><div className="text-center"><h2 className="text-xl font-semibold mb-2">Unable to load dashboard</h2><p className="text-text-muted">Please refresh the page or try again later.</p></div></div>}>
+    <Dashboard />
+  </ErrorBoundary>
+);
+
+const AdminWithBoundary = () => (
+  <ErrorBoundary fallback={<div className="min-h-screen flex items-center justify-center p-4"><div className="text-center"><h2 className="text-xl font-semibold mb-2">Unable to load admin panel</h2><p className="text-text-muted">Please refresh the page or try again later.</p></div></div>}>
+    <AdminDashboard />
+  </ErrorBoundary>
 );
 
 function App() {
@@ -56,27 +78,31 @@ function App() {
           <AuthProvider>
             <ToastProvider>
               <Router>
+                <SkipLink />
                 <div className="min-h-screen bg-transparent transition-colors duration-300 animate-fade-in-up">
+                  <ScrollProgress />
                   <Navbar />
-                  <Suspense fallback={<SimpleLoader />}>
-                    <Routes>
-                      <Route path="/" element={<Home />} />
-                      <Route path="/login" element={<Login />} />
-                      <Route path="/register" element={<Register />} />
-                      <Route path="/dashboard" element={
-                        <ProtectedRoute>
-                          <Dashboard />
-                        </ProtectedRoute>
-                      } />
-                      <Route path="/unlock/:code" element={<Unlock />} />
-                      <Route path="/bio/:slug" element={<BioView />} />
-                      <Route path="/admin" element={
-                        <ProtectedRoute adminOnly>
-                          <AdminDashboard />
-                        </ProtectedRoute>
-                      } />
-                    </Routes>
-                  </Suspense>
+                  <main id="main-content" tabIndex={-1} className="focus:outline-none">
+                    <Suspense fallback={<SimpleLoader />}>
+                      <Routes>
+                        <Route path="/" element={<HomeWithBoundary />} />
+                        <Route path="/login" element={<Login />} />
+                        <Route path="/register" element={<Register />} />
+                        <Route path="/dashboard" element={
+                          <ProtectedRoute>
+                            <DashboardWithBoundary />
+                          </ProtectedRoute>
+                        } />
+                        <Route path="/unlock/:code" element={<Unlock />} />
+                        <Route path="/bio/:slug" element={<BioView />} />
+                        <Route path="/admin" element={
+                          <ProtectedRoute adminOnly>
+                            <AdminWithBoundary />
+                          </ProtectedRoute>
+                        } />
+                      </Routes>
+                    </Suspense>
+                  </main>
                 </div>
               </Router>
             </ToastProvider>
@@ -88,4 +114,3 @@ function App() {
 }
 
 export default App;
-

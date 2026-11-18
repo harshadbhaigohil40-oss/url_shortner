@@ -3,7 +3,7 @@ const { RedisStore } = require('rate-limit-redis');
 const { createClient } = require('redis');
 const { ipKeyGenerator } = rateLimit;
 
-const redisUrl = process.env.REDIS_URL;
+const redisUrl = process.env.NODE_ENV === 'production' ? process.env.REDIS_URL : undefined;
 let redisClient;
 let redisReady = false;
 let redisConnecting = false;
@@ -98,7 +98,9 @@ const globalLimiter = createLimiter('global-api', 15 * 60 * 1000, 100, 'Too many
 });
 
 // Tightened authentication limits to mitigate credential stuffing attacks
-const authLimiter = createLimiter('authentication', 15 * 60 * 1000, 5, 'Too many authentication attempts, please try again later');
+// Supports shared-IP environments (NAT/offices) with 30 attempts per 15m in production, 100 in development
+const authMax = process.env.NODE_ENV === 'production' ? 30 : 100;
+const authLimiter = createLimiter('authentication', 15 * 60 * 1000, authMax, 'Too many authentication attempts, please try again later');
 
 const shortenLimiter = createLimiter('shorten', 15 * 60 * 1000, 30, 'Too many URLs created, please try again later');
 const unlockLimiter = createLimiter('unlock', 15 * 60 * 1000, 20, 'Too many unlock attempts, please try again later');

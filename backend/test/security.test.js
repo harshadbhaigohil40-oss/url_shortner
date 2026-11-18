@@ -40,3 +40,35 @@ test('shorten validation accepts HTTPS URLs', () => {
   const result = shortenSchema.safeParse({ longUrl: 'https://example.com/path' });
   assert.equal(result.success, true);
 });
+
+test('fileType buffer validation detects valid images and rejects fake or corrupted payloads', async () => {
+  const fileType = require('file-type');
+  const validPngBase64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  const pngBuffer = Buffer.from(validPngBase64, 'base64');
+  const detected = await fileType.fromBuffer(pngBuffer);
+  assert.ok(detected);
+  assert.equal(detected.mime, 'image/png');
+
+  const fakeScriptBuffer = Buffer.from('<script>alert("xss")</script>');
+  const fakeDetected = await fileType.fromBuffer(fakeScriptBuffer);
+  assert.equal(fakeDetected, undefined);
+});
+
+test('cache metrics helper functions return expected structure and valid numbers', () => {
+  const { getUrlCacheMetrics } = require('../controllers/urlController');
+  const { getBioCacheMetrics } = require('../controllers/bioController');
+
+  const urlMetrics = getUrlCacheMetrics();
+  assert.equal(typeof urlMetrics.size, 'number');
+  assert.equal(typeof urlMetrics.hits, 'number');
+  assert.equal(typeof urlMetrics.misses, 'number');
+  assert.equal(typeof urlMetrics.evictions, 'number');
+  assert.equal(typeof urlMetrics.hitRate, 'number');
+
+  const bioMetrics = getBioCacheMetrics();
+  assert.equal(typeof bioMetrics.size, 'number');
+  assert.equal(typeof bioMetrics.hits, 'number');
+  assert.equal(typeof bioMetrics.misses, 'number');
+  assert.equal(typeof bioMetrics.evictions, 'number');
+  assert.equal(typeof bioMetrics.hitRate, 'number');
+});

@@ -62,14 +62,30 @@ const urlFields = {
   splashDelay: z.number().int().min(1).max(30).optional().nullable(),
   isOneTime: z.boolean().optional().nullable(),
   geoTargets: z.array(geoTargetSchema).max(50).optional().nullable(),
-  deepLinkScheme: z.string().max(250).regex(/^[a-z][a-z0-9+.-]*:\/\//i).optional().nullable(),
+  deepLinkScheme: z.string().max(250)
+    .regex(/^[a-z][a-z0-9+.-]*:\/\//i, 'Invalid deep link scheme format')
+    .refine((val) => {
+      if (!val) return true;
+      const lower = val.toLowerCase().trim();
+      const dangerous = ['javascript:', 'data:', 'vbscript:', 'file:', 'blob:', 'about:'];
+      return !dangerous.some(scheme => lower.startsWith(scheme));
+    }, 'Dangerous or forbidden protocol scheme')
+    .optional().nullable(),
   aiSummary: z.string().max(1000).optional().nullable(),
   aiSafetyScore: z.number().min(0).max(100).optional().nullable(),
-  aiTags: z.array(z.string().max(50)).max(20).optional().nullable()
+  aiTags: z.array(z.string().max(50)).max(20).optional().nullable(),
+  tags: z.array(z.string().trim().max(30)).max(20).optional().nullable()
 };
 const shortenSchema = z.object(urlFields, objectOptions);
 const editUrlSchema = z.object({ ...urlFields, longUrl: urlString.optional(), customAlias: undefined }).partial().extend({ customAlias: z.never().optional() });
-const bulkSchema = z.object({ links: z.array(z.object({ longUrl: urlString, customAlias: customAliasSchema }, objectOptions)).min(1).max(20) }, objectOptions);
+const bulkSchema = z.object({
+  links: z.array(z.object({
+    longUrl: urlString,
+    customAlias: customAliasSchema,
+    tags: z.array(z.string().trim().max(30)).max(20).optional().nullable()
+  }, objectOptions)).min(1).max(20),
+  defaultTags: z.array(z.string().trim().max(30)).max(20).optional().nullable()
+}, objectOptions);
 const bioSchema = z.object({
   slug: z.string().trim().min(3).max(50).regex(/^[a-z0-9-]+$/i), title: z.string().trim().min(1).max(120),
   bio: z.string().max(2000).optional(), avatarUrl: optionalUrl, theme: z.string().max(40).optional(),
@@ -82,13 +98,21 @@ const codeSchema = z.object({ code: z.string().trim().min(3).max(100).regex(/^[a
 const bioPublicParamsSchema = z.object({ slug: z.string().trim().min(3).max(50).regex(/^[a-z0-9-]+$/i) }, objectOptions);
 const bioLinkParamsSchema = bioPublicParamsSchema.extend({ linkId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid link id') });
 const listQuerySchema = z.object({
-  page: z.coerce.number().int().min(1).max(100000).default(1), limit: z.coerce.number().int().min(1).max(100).default(10),
-  search: z.string().max(200).optional().default(''), sortBy: z.enum(['createdAt', 'clicks', 'shortCode', 'longUrl']).default('createdAt'), order: z.enum(['asc', 'desc']).default('desc')
+  page: z.coerce.number().int().min(1).max(100000).default(1),
+  limit: z.coerce.number().int().min(1).max(100).default(10),
+  search: z.string().max(200).optional().default(''),
+  tag: z.string().trim().max(30).optional().default(''),
+  sortBy: z.enum(['createdAt', 'clicks', 'shortCode', 'longUrl']).default('createdAt'),
+  order: z.enum(['asc', 'desc']).default('desc')
+}, objectOptions);
+const exportQuerySchema = z.object({
+  format: z.enum(['csv', 'json']).default('csv'),
+  urlId: z.string().regex(/^[a-f\d]{24}$/i, 'Invalid URL ID').optional()
 }, objectOptions);
 const otpSchema = z.object({ email: z.string().email(), otp: z.string().length(6) }, objectOptions);
 
 module.exports = {
   sanitize, validate, registerSchema, loginSchema, unlockSchema, passwordResetRequestSchema, passwordResetSchema, aiAnalyzeSchema, shortenSchema, editUrlSchema,
   bulkSchema, bioSchema, bioUpdateSchema, objectIdSchema, codeSchema, bioPublicParamsSchema,
-  bioLinkParamsSchema, avatarUploadParamsSchema, listQuerySchema, otpSchema
+  bioLinkParamsSchema, avatarUploadParamsSchema, listQuerySchema, exportQuerySchema, otpSchema
 };

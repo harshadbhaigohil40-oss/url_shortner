@@ -14,6 +14,7 @@ import BioPageList from "../components/BioPageList";
 import BioBuilder from "./BioBuilder";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import WorldMapAnalytics from "../components/ui/WorldMapAnalytics";
+import QRStudio from "../components/QRStudio";
 
 const Dashboard = () => {
   const { user, login, logout } = useContext(AuthContext);
@@ -34,6 +35,7 @@ const Dashboard = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [selectedTag, setSelectedTag] = useState("");
   const [sortBy, setSortBy] = useState("createdAt");
   const [order, setOrder] = useState("desc");
   const [analyticsDays, setAnalyticsDays] = useState(7);
@@ -41,6 +43,7 @@ const Dashboard = () => {
   
   // Expanded row state for Analytics & QR
   const [expandedId, setExpandedId] = useState(null);
+  const [studioUrl, setStudioUrl] = useState(null);
 
   // Edit & Toggle Link State
   const [editingUrl, setEditingUrl] = useState(null);
@@ -62,6 +65,7 @@ const Dashboard = () => {
   const [editIsOneTime, setEditIsOneTime] = useState(false);
   const [editAbTestTargets, setEditAbTestTargets] = useState([]);
   const [editGeoTargets, setEditGeoTargets] = useState([]);
+  const [editTags, setEditTags] = useState("");
 
   // Custom QR Designer State
   const [qrFgColor, setQrFgColor] = useState("#060e20");
@@ -73,6 +77,21 @@ const Dashboard = () => {
   const [showApiKey, setShowApiKey] = useState(false);
   const [revokingKey, setRevokingKey] = useState(false);
   const [codeSnippetLang, setCodeSnippetLang] = useState("curl");
+
+  // Analytics Export State
+  const [exportDropdownOpen, setExportDropdownOpen] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
+
+  // Link Health Monitoring State
+  const [checkingHealthId, setCheckingHealthId] = useState(null);
+  const [checkingAllHealth, setCheckingAllHealth] = useState(false);
+
+  // Bulk Shortener Modal State
+  const [isBulkOpen, setIsBulkOpen] = useState(false);
+  const [bulkInput, setBulkInput] = useState("");
+  const [bulkDefaultTags, setBulkDefaultTags] = useState("");
+  const [bulkLoading, setBulkLoading] = useState(false);
+  const [bulkSummary, setBulkSummary] = useState(null);
 
   // Debounce search
   useEffect(() => {
@@ -107,16 +126,16 @@ const Dashboard = () => {
     setLoading(true);
     try {
       const [res, statsRes] = await Promise.all([
-        apiFetch(`${API_URL}/api/myurls?page=${page}&limit=10&search=${encodeURIComponent(debouncedSearch)}&sortBy=${sortBy}&order=${order}`, {}, user, login, logout),
+        apiFetch(`${API_URL}/api/myurls?page=${page}&limit=10&search=${encodeURIComponent(debouncedSearch)}&tag=${encodeURIComponent(selectedTag)}&sortBy=${sortBy}&order=${order}`, {}, user, login, logout),
         apiFetch(`${API_URL}/api/myurls/stats`, {}, user, login, logout)
       ]);
-      
+
       if (res.ok) {
         const data = await res.json();
         setUrls(data.urls || []);
         setTotalPages(data.totalPages || 1);
       }
-      
+
       if (statsRes.ok) {
         const statsData = await statsRes.json();
         setStats(statsData);
@@ -132,7 +151,7 @@ const Dashboard = () => {
     fetchUrls();
     // fetchUrls uses the current dashboard filters and auth callbacks.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, navigate, page, debouncedSearch, sortBy, order, login, logout, refreshKey]);
+  }, [user, navigate, page, debouncedSearch, selectedTag, sortBy, order, login, logout, refreshKey]);
 
   const { addToast } = useToast();
 
@@ -195,6 +214,31 @@ const Dashboard = () => {
       if (eventSource) eventSource.close();
     };
   }, [user, addToast]);
+
+  const exportToCSV = () => {
+    if (!urls || urls.length === 0) {
+      addToast("No links to export", "warning");
+      return;
+    }
+    const headers = ["Short Code", "Short URL", "Original URL", "Clicks", "Health Status", "Created At"];
+    const rows = urls.map(u => [
+      u.shortCode,
+      getShortUrl(u.shortCode),
+      `"${(u.longUrl || '').replace(/"/g, '""')}"`,
+      u.clicks || 0,
+      u.healthStatus || 'unchecked',
+      new Date(u.createdAt).toISOString()
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `shortly_links_${Date.now()}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    addToast("Links exported to CSV successfully", "success");
+  };
 
   const downloadQR = (shortCode) => {
     const canvas = document.getElementById(`qr-${shortCode}`);
@@ -290,6 +334,7 @@ const Dashboard = () => {
     setEditIsOneTime(url.isOneTime || false);
     setEditAbTestTargets(url.abTestTargets || []);
     setEditGeoTargets(url.geoTargets || []);
+    setEditTags(Array.isArray(url.tags) ? url.tags.join(', ') : "");
   };
 
   const closeEditModal = () => {
@@ -311,6 +356,7 @@ const Dashboard = () => {
     setEditIsOneTime(false);
     setEditAbTestTargets([]);
     setEditGeoTargets([]);
+    setEditTags("");
   };
 
   const handleEditSubmit = async (e) => {
@@ -332,6 +378,9 @@ const Dashboard = () => {
         splashMessage: editSplashMessage || null,
         splashDelay: editSplashDelay ? parseInt(editSplashDelay, 10) : null,
         isOneTime: !!editIsOneTime,
+        tags: editTags
+          ? editTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean)
+          : [],
         abTestTargets: editAbTestTargets && editAbTestTargets.length > 0
           ? editAbTestTargets
               .filter(t => t.url.trim() !== "")
@@ -372,6 +421,64 @@ const Dashboard = () => {
       addToast('Error updating URL settings', 'error');
     } finally {
       setUpdatingUrl(false);
+    }
+  };
+
+  const handleBulkSubmit = async (e) => {
+    e.preventDefault();
+    if (!bulkInput.trim()) return;
+
+    setBulkLoading(true);
+    setBulkSummary(null);
+
+    try {
+      const lines = bulkInput.split('\n').map(l => l.trim()).filter(Boolean);
+      if (lines.length === 0) {
+        addToast("Please enter at least one URL", "error");
+        setBulkLoading(false);
+        return;
+      }
+
+      if (lines.length > 20) {
+        addToast("Maximum 20 URLs allowed per batch", "error");
+        setBulkLoading(false);
+        return;
+      }
+
+      const links = lines.map(line => {
+        const parts = line.split(',').map(p => p.trim());
+        const longUrl = parts[0];
+        const customAlias = parts[1] || undefined;
+        return { longUrl, customAlias };
+      });
+
+      const payload = { links };
+      if (bulkDefaultTags) {
+        const parsedTags = bulkDefaultTags.split(',').map(t => t.trim().toLowerCase()).filter(Boolean);
+        if (parsedTags.length > 0) payload.defaultTags = parsedTags;
+      }
+
+      const res = await apiFetch(`${API_URL}/api/shorten/bulk`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      }, user, login, logout);
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.message || "Failed to process bulk URLs");
+      }
+
+      setBulkSummary(data.results || []);
+      setBulkInput("");
+      setBulkDefaultTags("");
+      addToast(`Successfully processed ${data.results?.length || 0} links!`, "success");
+      setRefreshKey(k => k + 1);
+    } catch (err) {
+      console.error("Bulk shorten error:", err);
+      addToast(err.message || "Bulk shortening failed", "error");
+    } finally {
+      setBulkLoading(false);
     }
   };
 
@@ -438,33 +545,120 @@ const Dashboard = () => {
     });
   };
 
-  const exportToCSV = () => {
-    if (urls.length === 0) return addToast('No URLs to export', 'error');
-    
-    const headers = ['Original URL', 'Short URL', 'Clicks', 'Title', 'Created At'];
-    const csvRows = [headers.join(',')];
-    
-    urls.forEach(url => {
-      const row = [
-        `"${url.longUrl}"`,
-        `"${getShortUrl(url.shortCode)}"`,
-        url.clicks,
-        `"${url.title || ''}"`,
-        `"${new Date(url.createdAt).toLocaleDateString()}"`
-      ];
-      csvRows.push(row.join(','));
-    });
-    
-    const blob = new Blob([csvRows.join('\n')], { type: 'text/csv' });
-    const blobUrl = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = blobUrl;
-    a.download = `shortyurl-export-${new Date().toISOString().split('T')[0]}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.URL.revokeObjectURL(blobUrl);
-    addToast('Exported successfully', 'success');
+  const handleExport = async (format = 'csv', urlId = null) => {
+    setIsExporting(true);
+    try {
+      const query = new URLSearchParams({ format });
+      if (urlId) query.set('urlId', urlId);
+
+      const res = await apiFetch(`${API_URL}/api/myurls/export?${query.toString()}`, {}, user, login, logout);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        addToast(err.message || 'Failed to export analytics', 'error');
+        return;
+      }
+
+      const blob = await res.blob();
+      const disposition = res.headers.get('content-disposition');
+      let filename = `shortly-${urlId ? 'link' : 'all-links'}-analytics-${Date.now()}.${format}`;
+      if (disposition && disposition.includes('filename=')) {
+        const match = disposition.match(/filename="?([^";]+)"?/);
+        if (match && match[1]) filename = match[1];
+      }
+
+      const blobUrl = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = blobUrl;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(blobUrl);
+      addToast(`Analytics exported as ${format.toUpperCase()}`, 'success');
+    } catch (err) {
+      console.error('Export error:', err);
+      addToast('Failed to export analytics', 'error');
+    } finally {
+      setIsExporting(false);
+      setExportDropdownOpen(false);
+    }
+  };
+
+  const checkUrlHealth = async (urlId) => {
+    setCheckingHealthId(urlId);
+    try {
+      const res = await apiFetch(`${API_URL}/api/urls/${urlId}/check-health`, {
+        method: "POST"
+      }, user, login, logout);
+
+      if (res.ok) {
+        const data = await res.json();
+        setUrls((prevUrls) =>
+          prevUrls.map((u) =>
+            u._id === urlId
+              ? {
+                  ...u,
+                  healthStatus: data.healthStatus,
+                  healthStatusCode: data.healthStatusCode,
+                  healthResponseTimeMs: data.healthResponseTimeMs,
+                  healthLastCheckedAt: data.healthLastCheckedAt,
+                  healthError: data.healthError
+                }
+              : u
+          )
+        );
+
+        if (data.healthStatus === 'healthy') {
+          addToast(`Link healthy (${data.healthStatusCode || 200} OK, ${data.healthResponseTimeMs}ms)`, 'success');
+        } else if (data.healthStatus === 'broken') {
+          addToast(`Link broken: ${data.healthError || 'HTTP ' + data.healthStatusCode}`, 'error');
+        } else {
+          addToast(`Link health: ${data.healthStatus} (${data.healthError || 'Status ' + data.healthStatusCode})`, 'warning');
+        }
+      } else {
+        const err = await res.json().catch(() => ({}));
+        addToast(err.message || 'Health check failed', 'error');
+      }
+    } catch (err) {
+      console.error('Check URL health error:', err);
+      addToast('Health check request failed', 'error');
+    } finally {
+      setCheckingHealthId(null);
+    }
+  };
+
+  const checkAllUrlsHealth = async () => {
+    setCheckingAllHealth(true);
+    try {
+      const res = await apiFetch(`${API_URL}/api/urls/check-health-all`, {
+        method: "POST"
+      }, user, login, logout);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.items)) {
+          const healthMap = new Map(data.items.map(item => [item._id, item]));
+          setUrls((prevUrls) =>
+            prevUrls.map((u) => {
+              const checked = healthMap.get(u._id);
+              return checked ? { ...u, ...checked } : u;
+            })
+          );
+        }
+        addToast(
+          `Health Check: ${data.healthy} healthy, ${data.broken} broken, ${data.warning + data.unreachable} warning`,
+          data.broken > 0 ? 'warning' : 'success'
+        );
+      } else {
+        const err = await res.json().catch(() => ({}));
+        addToast(err.message || 'Bulk health check failed', 'error');
+      }
+    } catch (err) {
+      console.error('Check all health error:', err);
+      addToast('Bulk health check request failed', 'error');
+    } finally {
+      setCheckingAllHealth(false);
+    }
   };
 
   // Helper to process click history into chart data
@@ -634,18 +828,74 @@ const Dashboard = () => {
               <span className="material-symbols-outlined absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-on-surface-variant">expand_more</span>
             </div>
             
-            {/* Export CSV Button */}
+            {/* Export Analytics Dropdown */}
+            <div className="relative w-full sm:w-auto">
+              <Button 
+                variant="outline"
+                icon="download"
+                disabled={isExporting}
+                onClick={() => setExportDropdownOpen(prev => !prev)}
+                className="w-full sm:w-auto"
+              >
+                {isExporting ? 'Exporting...' : 'Export Analytics'}
+              </Button>
+              {exportDropdownOpen && (
+                <div className="absolute right-0 mt-2 w-52 bg-surface-container-high border border-border-glass rounded-xl shadow-2xl z-30 py-1.5 backdrop-blur-xl animate-fade-in">
+                  <button
+                    onClick={() => handleExport('csv')}
+                    className="w-full text-left px-4 py-2.5 text-body-md text-on-surface hover:bg-surface-container-highest flex items-center gap-2.5 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-primary">table_view</span>
+                    Export All Links (CSV)
+                  </button>
+                  <button
+                    onClick={() => handleExport('json')}
+                    className="w-full text-left px-4 py-2.5 text-body-md text-on-surface hover:bg-surface-container-highest flex items-center gap-2.5 transition-colors"
+                  >
+                    <span className="material-symbols-outlined text-[18px] text-tertiary">data_object</span>
+                    Export All Links (JSON)
+                  </button>
+                </div>
+              )}
+            </div>
+            
+            {/* Bulk Shorten Button */}
+            <Button
+              variant="outline"
+              icon="library_add"
+              onClick={() => {
+                setIsBulkOpen(true);
+                setBulkSummary(null);
+              }}
+              className="w-full sm:w-auto"
+            >
+              Bulk Shorten
+            </Button>
+
+            {/* Check All Link Health Button */}
             <Button 
               variant="outline"
+              icon="health_and_safety"
+              disabled={checkingAllHealth || urls.length === 0}
+              onClick={checkAllUrlsHealth}
+              className="w-full sm:w-auto"
+            >
+              {checkingAllHealth ? 'Checking...' : 'Check Health'}
+            </Button>
+
+            {/* Export CSV Button */}
+            <Button
+              variant="outline"
               icon="download"
+              disabled={urls.length === 0}
               onClick={exportToCSV}
               className="w-full sm:w-auto"
             >
               Export CSV
             </Button>
-            
+
             {/* New Link Button */}
-            <Button 
+            <Button
               variant="gradient"
               icon="add"
               onClick={() => navigate('/')}
@@ -816,6 +1066,53 @@ const Dashboard = () => {
           </div>
         </GlassCard>
 
+        {/* Tag Category Filter Bar */}
+        {((stats?.topTags && stats.topTags.length > 0) || selectedTag) && (
+          <div className="flex flex-wrap items-center gap-2 mb-6 p-3 bg-surface-container-low/70 border border-border-glass rounded-2xl backdrop-blur-md animate-fade-in">
+            <span className="text-label-sm font-label-sm text-text-muted flex items-center gap-1.5 mr-1 font-semibold">
+              <span className="material-symbols-outlined text-[16px] text-tertiary">label</span> Filter by Tag:
+            </span>
+            <button
+              onClick={() => { setSelectedTag(""); setPage(1); }}
+              className={`px-3 py-1 rounded-full text-label-sm transition-all flex items-center gap-1 cursor-pointer ${
+                !selectedTag
+                  ? 'bg-primary text-on-primary shadow-sm font-bold'
+                  : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
+              }`}
+            >
+              All Links
+            </button>
+            {stats?.topTags?.map((tag) => (
+              <button
+                key={tag._id}
+                onClick={() => {
+                  setSelectedTag(selectedTag === tag._id ? "" : tag._id);
+                  setPage(1);
+                }}
+                className={`px-3 py-1 rounded-full text-label-sm transition-all flex items-center gap-1.5 cursor-pointer ${
+                  selectedTag === tag._id
+                    ? 'bg-tertiary text-on-tertiary shadow-sm font-bold'
+                    : 'bg-surface-container-high text-on-surface-variant hover:text-on-surface hover:bg-surface-container-highest'
+                }`}
+              >
+                <span>#{tag._id}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full font-mono ${selectedTag === tag._id ? 'bg-black/30' : 'bg-surface-container-lowest text-text-muted'}`}>
+                  {tag.count}
+                </span>
+              </button>
+            ))}
+            {selectedTag && !stats?.topTags?.some(t => t._id === selectedTag) && (
+              <button
+                onClick={() => { setSelectedTag(""); setPage(1); }}
+                className="px-3 py-1 rounded-full text-label-sm bg-tertiary text-on-tertiary font-bold flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>#{selectedTag}</span>
+                <span className="material-symbols-outlined text-[14px]">close</span>
+              </button>
+            )}
+          </div>
+        )}
+
         {/* Main Glass Table Card */}
         <GlassCard className="shadow-2xl card-hover-lift animate-fade-in-up" style={{ animationDelay: '100ms' }}>
           <div className="overflow-x-auto">
@@ -850,34 +1147,74 @@ const Dashboard = () => {
                   urls.map((url) => (
                     <React.Fragment key={url._id}>
                       <tr className="hover:bg-surface-glass transition-colors">
-                        <td className="px-6 py-4 max-w-xs truncate">
-                          <div className="flex flex-col gap-1">
-                            <div className="flex items-center gap-2">
+                        <td className="px-6 py-4 max-w-xs">
+                          <div className="flex flex-col gap-1 min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap min-w-0">
                               {url.favicon ? (
-                                <img src={url.favicon} alt="icon" className="w-4 h-4 rounded-sm" onError={(e) => e.target.style.display='none'} />
+                                <img src={url.favicon} alt="icon" className="w-4 h-4 rounded-sm flex-shrink-0" onError={(e) => e.target.style.display='none'} />
                               ) : (
-                                <span className="material-symbols-outlined text-[16px] text-text-muted">link</span>
+                                <span className="material-symbols-outlined text-[16px] text-text-muted flex-shrink-0">link</span>
                               )}
-                              <span className="text-body-md text-on-surface font-semibold truncate" title={url.title || url.longUrl}>
+                              <span className="text-body-md text-on-surface font-semibold truncate max-w-[180px]" title={url.title || url.longUrl}>
                                 {url.title || "Untitled Link"}
                               </span>
-                              <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold inline-block ${url.isActive ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' : 'bg-amber-950/40 text-amber-400 border border-amber-500/20'}`}>
+                              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold flex-shrink-0 ${url.isActive ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' : 'bg-amber-950/40 text-amber-400 border border-amber-500/20'}`}>
                                 {url.isActive ? 'Active' : 'Paused'}
                               </span>
+                              {url.healthStatus && url.healthStatus !== 'unchecked' && (
+                                <span 
+                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold inline-flex items-center gap-1 flex-shrink-0 ${
+                                    url.healthStatus === 'healthy' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30' :
+                                    url.healthStatus === 'broken' ? 'bg-rose-950/40 text-rose-400 border border-rose-500/30' :
+                                    url.healthStatus === 'warning' ? 'bg-amber-950/40 text-amber-400 border border-amber-500/30' :
+                                    'bg-slate-900/40 text-slate-400 border border-slate-500/30'
+                                  }`}
+                                  title={url.healthError || (url.healthStatusCode ? `HTTP ${url.healthStatusCode} (${url.healthResponseTimeMs}ms)` : 'Health checked')}
+                                >
+                                  <span className={`w-1.5 h-1.5 rounded-full ${
+                                    url.healthStatus === 'healthy' ? 'bg-emerald-400' :
+                                    url.healthStatus === 'broken' ? 'bg-rose-400' :
+                                    url.healthStatus === 'warning' ? 'bg-amber-400' : 'bg-slate-400'
+                                  }`}></span>
+                                  {url.healthStatus === 'healthy' ? `Healthy (${url.healthResponseTimeMs}ms)` :
+                                   url.healthStatus === 'broken' ? `Broken (${url.healthStatusCode || 'Err'})` :
+                                   url.healthStatus === 'warning' ? `Warning (${url.healthStatusCode})` :
+                                   'Unreachable'}
+                                </span>
+                              )}
                               {url.expiresAt && new Date(url.expiresAt) > new Date() && (
-                                <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold inline-block bg-purple-950/40 text-purple-400 border border-purple-500/20" title={`Expires ${new Date(url.expiresAt).toLocaleString()}`}>
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold inline-block bg-purple-950/40 text-purple-400 border border-purple-500/20 flex-shrink-0" title={`Expires ${new Date(url.expiresAt).toLocaleString()}`}>
                                   Expiring soon
                                 </span>
                               )}
                               {url.expiresAt && new Date(url.expiresAt) <= new Date() && (
-                                <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold inline-block bg-rose-950/40 text-rose-400 border border-rose-500/20">
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold inline-block bg-rose-950/40 text-rose-400 border border-rose-500/20 flex-shrink-0">
                                   Expired
                                 </span>
                               )}
                             </div>
-                            <span className="text-body-sm text-text-muted truncate ml-6 min-w-0 break-all sm:break-normal" title={url.longUrl}>
+                            <span className="text-body-sm text-text-muted truncate min-w-0 max-w-[280px] break-all block" title={url.longUrl}>
                               {url.longUrl}
                             </span>
+                            {url.tags && url.tags.length > 0 && (
+                              <div className="flex flex-wrap gap-1.5 ml-6 mt-1">
+                                {url.tags.map(tag => (
+                                  <button
+                                    key={tag}
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setSelectedTag(tag);
+                                      setPage(1);
+                                    }}
+                                    className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary border border-tertiary/20 hover:bg-tertiary/20 transition-colors cursor-pointer"
+                                    title={`Filter by #${tag}`}
+                                  >
+                                    <span>#{tag}</span>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </td>
                         <td className="px-6 py-4">
@@ -949,6 +1286,14 @@ const Dashboard = () => {
                               {expandedId === url._id ? 'expand_less' : 'expand_more'}
                             </button>
                             <button 
+                              onClick={() => checkUrlHealth(url._id)}
+                              disabled={checkingHealthId === url._id}
+                              className={`material-symbols-outlined p-2 rounded-lg transition-colors text-on-surface-variant hover:text-emerald-400 hover:bg-surface-container-highest ${checkingHealthId === url._id ? 'animate-spin text-primary' : ''}`}
+                              title="Check Link Health"
+                            >
+                              {checkingHealthId === url._id ? 'sync' : 'health_and_safety'}
+                            </button>
+                            <button 
                               onClick={() => deleteUrl(url)}
                               className="material-symbols-outlined text-on-surface-variant p-2 rounded-lg hover:bg-error-container/20 hover:text-error transition-colors"
                               title="Delete"
@@ -967,20 +1312,40 @@ const Dashboard = () => {
                               
                               {/* Analytics Chart Column */}
                               <div className="space-y-6">
-                                <div className="flex justify-between items-center">
+                                <div className="flex flex-wrap justify-between items-center gap-3">
                                   <h3 className="font-headline-md text-headline-md">Advanced Analytics</h3>
-                                  <div className="flex bg-surface-container-highest p-1 rounded-lg">
-                                    <button 
-                                      onClick={() => setAnalyticsDays(7)} 
-                                      className={`px-4 py-1 text-label-sm rounded-md transition-colors ${analyticsDays === 7 ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                  <div className="flex items-center gap-2">
+                                    <div className="flex bg-surface-container-highest p-1 rounded-lg">
+                                      <button 
+                                        onClick={() => setAnalyticsDays(7)} 
+                                        className={`px-4 py-1 text-label-sm rounded-md transition-colors ${analyticsDays === 7 ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                      >
+                                        7 Days
+                                      </button>
+                                      <button 
+                                        onClick={() => setAnalyticsDays(30)} 
+                                        className={`px-4 py-1 text-label-sm rounded-md transition-colors ${analyticsDays === 30 ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                      >
+                                        30 Days
+                                      </button>
+                                    </div>
+                                    <button
+                                      title="Export Link Click Log (CSV)"
+                                      onClick={() => handleExport('csv', url._id)}
+                                      disabled={isExporting}
+                                      className="px-2.5 py-1 text-label-sm rounded-lg border border-border-glass bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex items-center gap-1 font-medium"
                                     >
-                                      7 Days
+                                      <span className="material-symbols-outlined text-[15px]">download</span>
+                                      CSV
                                     </button>
-                                    <button 
-                                      onClick={() => setAnalyticsDays(30)} 
-                                      className={`px-4 py-1 text-label-sm rounded-md transition-colors ${analyticsDays === 30 ? 'bg-primary text-on-primary shadow-sm' : 'text-on-surface-variant hover:text-on-surface'}`}
+                                    <button
+                                      title="Export Link Click Log (JSON)"
+                                      onClick={() => handleExport('json', url._id)}
+                                      disabled={isExporting}
+                                      className="px-2.5 py-1 text-label-sm rounded-lg border border-border-glass bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-tertiary transition-colors flex items-center gap-1 font-medium"
                                     >
-                                      30 Days
+                                      <span className="material-symbols-outlined text-[15px]">data_object</span>
+                                      JSON
                                     </button>
                                   </div>
                                 </div>
@@ -1179,25 +1544,40 @@ const Dashboard = () => {
                 urls.map((url) => (
                   <div key={`mobile-${url._id}`} className="p-4 flex flex-col gap-3">
                     <div className="flex justify-between items-start gap-4">
-                      <div className="flex flex-col gap-1 overflow-hidden min-w-0">
+                      <div className="flex flex-col gap-1 overflow-hidden min-w-0 flex-1">
                         <span className="text-label-sm text-text-muted uppercase tracking-wider">Short URL</span>
-                        <div className="flex flex-wrap items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-1.5 min-w-0">
                           <a 
-                            className="text-primary font-semibold hover:underline flex items-center gap-1" 
+                            className="text-primary font-semibold hover:underline flex items-center gap-1 truncate max-w-[140px]" 
                             href={getShortUrl(url.shortCode)} 
                             target="_blank" 
                             rel="noopener noreferrer"
                           >
-                            {url.isOneTime && <span className="material-symbols-outlined text-[14px] text-error animate-pulse">local_fire_department</span>}
-                            {url.password && <span className="material-symbols-outlined text-[14px] text-tertiary">lock</span>}
-                            <span>{url.shortCode}</span>
+                            {url.isOneTime && <span className="material-symbols-outlined text-[14px] text-error animate-pulse flex-shrink-0">local_fire_department</span>}
+                            {url.password && <span className="material-symbols-outlined text-[14px] text-tertiary flex-shrink-0">lock</span>}
+                            <span className="truncate">{url.shortCode}</span>
                           </a>
-                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold ${url.isActive ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' : 'bg-amber-950/40 text-amber-400 border border-amber-500/20'}`}>
+                          <span className={`px-1.5 py-0.5 rounded text-[8px] font-bold flex-shrink-0 ${url.isActive ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/20' : 'bg-amber-950/40 text-amber-400 border border-amber-500/20'}`}>
                             {url.isActive ? 'Active' : 'Paused'}
                           </span>
+                          {url.healthStatus && url.healthStatus !== 'unchecked' && (
+                            <span 
+                              className={`px-1.5 py-0.5 rounded text-[8px] font-bold flex-shrink-0 ${
+                                url.healthStatus === 'healthy' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-500/30' :
+                                url.healthStatus === 'broken' ? 'bg-rose-950/40 text-rose-400 border border-rose-500/30' :
+                                url.healthStatus === 'warning' ? 'bg-amber-950/40 text-amber-400 border border-amber-500/30' :
+                                'bg-slate-900/40 text-slate-400 border border-slate-500/30'
+                              }`}
+                            >
+                              {url.healthStatus === 'healthy' ? 'Healthy' :
+                               url.healthStatus === 'broken' ? 'Broken' :
+                               url.healthStatus === 'warning' ? 'Warning' : 'Offline'}
+                            </span>
+                          )}
                           <button 
                             onClick={() => copyToClipboard(getShortUrl(url.shortCode))}
-                            className="material-symbols-outlined text-[18px] text-on-surface-variant active:scale-90"
+                            className="material-symbols-outlined text-[18px] text-on-surface-variant active:scale-90 flex-shrink-0"
+                            title="Copy short link"
                           >
                             content_copy
                           </button>
@@ -1226,6 +1606,23 @@ const Dashboard = () => {
                       <span className="text-body-sm text-text-muted truncate break-all sm:break-normal w-full" title={url.longUrl}>
                         {url.longUrl}
                       </span>
+                      {url.tags && url.tags.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mt-1">
+                          {url.tags.map(tag => (
+                            <button
+                              key={tag}
+                              type="button"
+                              onClick={() => {
+                                setSelectedTag(tag);
+                                setPage(1);
+                              }}
+                              className="inline-flex items-center gap-0.5 text-[10px] font-medium px-2 py-0.5 rounded-md bg-tertiary/10 text-tertiary border border-tertiary/20 hover:bg-tertiary/20 transition-colors cursor-pointer"
+                            >
+                              #{tag}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex flex-wrap gap-2 justify-between items-center mt-2 pt-2 border-t border-border-glass/50">
@@ -1261,6 +1658,15 @@ const Dashboard = () => {
                           onClick={() => toggleUrlStatus(url._id, url.isActive)}
                         >
                           {url.isActive ? 'Pause' : 'Resume'}
+                        </Button>
+                        <Button 
+                          variant="outline" 
+                          className="!px-2 !py-1 text-label-sm h-auto text-emerald-400"
+                          icon={checkingHealthId === url._id ? "sync" : "health_and_safety"}
+                          disabled={checkingHealthId === url._id}
+                          onClick={() => checkUrlHealth(url._id)}
+                        >
+                          {checkingHealthId === url._id ? 'Checking' : 'Health'}
                         </Button>
                       </div>
                       <Button 
@@ -1332,6 +1738,26 @@ const Dashboard = () => {
                           <button onClick={() => downloadQR(url.shortCode)} className="text-primary hover:underline font-label-sm mt-3 block w-full">
                             Download QR
                           </button>
+
+                          <div className="flex gap-2 justify-center mt-3 pt-2 border-t border-border-glass/40">
+                            <button
+                              onClick={() => handleExport('csv', url._id)}
+                              disabled={isExporting}
+                              className="text-primary hover:underline font-label-sm flex items-center gap-1"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">download</span>
+                              Export CSV
+                            </button>
+                            <span className="text-on-surface-variant/40">|</span>
+                            <button
+                              onClick={() => handleExport('json', url._id)}
+                              disabled={isExporting}
+                              className="text-tertiary hover:underline font-label-sm flex items-center gap-1"
+                            >
+                              <span className="material-symbols-outlined text-[14px]">data_object</span>
+                              Export JSON
+                            </button>
+                          </div>
                         </div>
                       </div>
                     )}
@@ -1396,7 +1822,7 @@ const Dashboard = () => {
               </div>
 
               <div className="space-y-2">
-                <Input 
+                <Input
                   type="datetime-local"
                   label="Expiration Date"
                   value={editExpiresAt}
@@ -1404,6 +1830,18 @@ const Dashboard = () => {
                   className="[color-scheme:dark]"
                   icon="event"
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  label="Tags / Categories (comma-separated)"
+                  placeholder="e.g. marketing, summer2026, social"
+                  value={editTags}
+                  onChange={(e) => setEditTags(e.target.value)}
+                  icon="label"
+                />
+                <p className="text-[11px] text-text-muted ml-1">Assign categories or campaigns to filter links on your dashboard.</p>
               </div>
 
               <div className="space-y-2">
@@ -1675,16 +2113,16 @@ const Dashboard = () => {
               </div>
 
               <div className="flex justify-end gap-3 mt-8">
-                <Button 
-                  type="button" 
-                  variant="outline" 
+                <Button
+                  type="button"
+                  variant="outline"
                   onClick={closeEditModal}
                   disabled={updatingUrl}
                 >
                   Cancel
                 </Button>
-                <Button 
-                  type="submit" 
+                <Button
+                  type="submit"
                   variant="gradient"
                   loading={updatingUrl}
                 >
@@ -1694,6 +2132,126 @@ const Dashboard = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Bulk Shorten Modal */}
+      {isBulkOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
+          <div className="w-[95%] sm:w-[650px] max-w-2xl bg-surface-container-high border border-border-glass rounded-3xl p-6 sm:p-8 shadow-2xl relative max-h-[90vh] overflow-y-auto text-left">
+            <button
+              onClick={() => {
+                setIsBulkOpen(false);
+                setBulkSummary(null);
+              }}
+              className="absolute top-4 right-4 text-on-surface-variant hover:text-on-surface p-2 rounded-lg hover:bg-surface-container-highest transition-colors"
+            >
+              <span className="material-symbols-outlined">close</span>
+            </button>
+
+            <h2 className="font-headline-md text-headline-md mb-2 flex items-center gap-2">
+              <span className="material-symbols-outlined text-primary">library_add</span> Bulk URL Shortener
+            </h2>
+            <p className="text-body-sm text-text-muted mb-6">
+              Shorten up to 20 URLs at once. Enter one URL per line with optional custom alias separated by a comma.
+            </p>
+
+            <form onSubmit={handleBulkSubmit} className="space-y-6">
+              <div className="space-y-2">
+                <label className="text-label-sm font-label-sm text-on-surface-variant uppercase ml-1 block font-semibold">
+                  URLs (One per line)
+                </label>
+                <textarea
+                  required
+                  rows="6"
+                  placeholder={"https://example.com/page-1\nhttps://example.com/page-2, custom-alias-2\nhttps://example.com/page-3"}
+                  value={bulkInput}
+                  onChange={(e) => setBulkInput(e.target.value)}
+                  className="w-full bg-surface-container-low border border-border-glass rounded-xl p-4 text-body-md focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary transition-all text-on-surface placeholder:text-on-surface-variant/50 font-mono text-sm resize-none"
+                />
+                <p className="text-[11px] text-text-muted ml-1">Format: <code className="text-primary font-mono">https://url.com</code> or <code className="text-primary font-mono">https://url.com, custom-alias</code></p>
+              </div>
+
+              <div className="space-y-2">
+                <Input
+                  type="text"
+                  label="Batch Tags / Categories (optional)"
+                  placeholder="e.g. campaign2026, social, bulk-import"
+                  value={bulkDefaultTags}
+                  onChange={(e) => setBulkDefaultTags(e.target.value)}
+                  icon="label"
+                />
+                <p className="text-[11px] text-text-muted ml-1">These tags will be automatically applied to all links in this batch.</p>
+              </div>
+
+              {/* Bulk Results Summary */}
+              {bulkSummary && bulkSummary.length > 0 && (
+                <div className="p-4 bg-surface-container-lowest rounded-2xl border border-border-glass space-y-3">
+                  <div className="flex items-center justify-between pb-2 border-b border-border-glass">
+                    <span className="text-label-sm font-bold text-emerald-400 flex items-center gap-1.5">
+                      <span className="material-symbols-outlined text-[16px]">check_circle</span> Processed {bulkSummary.length} Links
+                    </span>
+                  </div>
+                  <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                    {bulkSummary.map((item, idx) => (
+                      <div key={idx} className="flex items-center justify-between p-2.5 bg-surface-container-low rounded-xl border border-border-glass text-xs">
+                        <div className="flex flex-col min-w-0 mr-2">
+                          <a
+                            href={item.shortUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-primary font-bold hover:underline truncate"
+                          >
+                            {item.shortUrl}
+                          </a>
+                          <span className="text-text-muted truncate max-w-xs">{item.longUrl}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(item.shortUrl)}
+                          className="p-1.5 rounded-lg bg-surface-container-high hover:bg-surface-container-highest text-on-surface-variant hover:text-primary transition-colors flex-shrink-0"
+                          title="Copy Link"
+                        >
+                          <span className="material-symbols-outlined text-[16px]">content_copy</span>
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="flex justify-end gap-3 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setIsBulkOpen(false);
+                    setBulkSummary(null);
+                  }}
+                  disabled={bulkLoading}
+                >
+                  Close
+                </Button>
+                <Button
+                  type="submit"
+                  variant="gradient"
+                  loading={bulkLoading}
+                  icon="rocket_launch"
+                >
+                  Shorten Batch
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Custom QR Studio Modal */}
+      {studioUrl && (
+        <QRStudio
+          url={studioUrl.url}
+          shortCode={studioUrl.shortCode}
+          onClose={() => setStudioUrl(null)}
+        />
       )}
 
       {/* Footer */}

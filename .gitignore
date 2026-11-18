@@ -8,3 +8,6 @@ private-uploads/
 dist/
 coverage/
 .claude/
+walkthrough_screenshots/
+*.png
+test_results.json

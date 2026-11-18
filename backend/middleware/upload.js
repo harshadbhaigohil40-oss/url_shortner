@@ -2,7 +2,7 @@ const multer = require('multer');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs/promises');
-const { fileTypeFromBuffer } = require('file-type');
+const fileType = require('file-type');
 
 const MAX_FILE_SIZE = 2 * 1024 * 1024;
 const uploadRoot = path.resolve(process.env.UPLOAD_DIR || path.join(__dirname, '..', 'private-uploads'));
@@ -58,7 +58,12 @@ const secureUpload = async (req, res, next) => {
     if (!req.file) return res.status(400).json({ message: 'An avatar file is required' });
 
     try {
-      const detected = await fileTypeFromBuffer(req.file.buffer);
+      let detected;
+      try {
+        detected = await fileType.fromBuffer(req.file.buffer);
+      } catch {
+        return res.status(400).json({ message: 'Corrupt or unreadable image file' });
+      }
       const expectedExtension = detected && allowedTypes.get(detected.mime);
       if (!expectedExtension || expectedExtension !== allowedTypes.get(req.file.mimetype)) {
         return res.status(400).json({ message: 'File content does not match an allowed image type' });

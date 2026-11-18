@@ -2,9 +2,27 @@ const BioPage = require("../models/BioPage");
 const AuditLog = require("../models/AuditLog");
 const { LRUCache } = require("lru-cache");
 
+const bioCacheMetrics = {
+  hits: 0,
+  misses: 0,
+  evictions: 0,
+  get size() {
+    return bioCache.size;
+  },
+  get hitRate() {
+    const total = this.hits + this.misses;
+    return total === 0 ? 0 : Number((this.hits / total).toFixed(4));
+  }
+};
+
 const bioCache = new LRUCache({
   max: 500,
-  ttl: 1000 * 60 * 30 // 30 minutes
+  ttl: 1000 * 60 * 30, // 30 minutes
+  dispose: (value, key, reason) => {
+    if (reason === 'evict') {
+      bioCacheMetrics.evictions++;
+    }
+  }
 });
 
 const RESERVED_BIO_SLUGS = new Set(['admin', 'api', 'dashboard', 'settings', 'create', 'edit', 'delete', 'my', 'public']);
@@ -78,12 +96,15 @@ exports.getPublicBioPage = async (req, res) => {
     // Check LRU Cache
     const cached = bioCache.get(cleanSlug);
     if (cached) {
+      bioCacheMetrics.hits++;
       // Async view increment in DB & memory cache sync
       BioPage.updateOne({ slug: cleanSlug }, { $inc: { views: 1 } }).catch(() => {});
       cached.views = (cached.views || 0) + 1;
       bioCache.set(cleanSlug, cached);
       return res.json(cached);
     }
+
+    bioCacheMetrics.misses++;
 
     const bioPage = await BioPage.findOne({ slug: cleanSlug });
     if (!bioPage) {
@@ -209,3 +230,11 @@ exports.trackLinkClick = async (req, res) => {
     res.status(500).json({ message: "Error tracking link click" });
   }
 };
+
+exports.getBioCacheMetrics = () => ({
+  size: bioCacheMetrics.size,
+  hits: bioCacheMetrics.hits,
+  misses: bioCacheMetrics.misses,
+  evictions: bioCacheMetrics.evictions,
+  hitRate: bioCacheMetrics.hitRate
+});

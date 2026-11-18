@@ -93,9 +93,9 @@ app.use(helmet({
       camera: [], microphone: [], geolocation: [], payment: []
     }
   },
-  crossOriginEmbedderPolicy: true,
-  crossOriginOpenerPolicy: { policy: 'same-origin' },
-  crossOriginResourcePolicy: { policy: 'same-origin' },
+  crossOriginEmbedderPolicy: false,
+  crossOriginOpenerPolicy: { policy: 'same-origin-allow-popups' },
+  crossOriginResourcePolicy: { policy: 'cross-origin' },
   originAgentCluster: true,
   xContentTypeOptions: true,
   xDnsPrefetchControl: { allow: false },
@@ -217,6 +217,27 @@ app.get('/ready', async (req, res) => {
   };
   const ready = mongoReady && (!redis.configured || redis.ready);
   return res.status(ready ? 200 : 503).json({ status: ready ? 'ready' : 'not_ready', dependencies });
+});
+
+app.get('/metrics', (req, res) => {
+  const { getUrlCacheMetrics } = require('./controllers/urlController');
+  const { getBioCacheMetrics } = require('./controllers/bioController');
+  const memory = process.memoryUsage();
+  res.json({
+    service: 'url-shortener',
+    timestamp: new Date().toISOString(),
+    uptimeSeconds: Math.floor(process.uptime()),
+    memory: {
+      rssMb: Math.round(memory.rss / 1024 / 1024),
+      heapTotalMb: Math.round(memory.heapTotal / 1024 / 1024),
+      heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+      externalMb: Math.round(memory.external / 1024 / 1024)
+    },
+    caches: {
+      url: typeof getUrlCacheMetrics === 'function' ? getUrlCacheMetrics() : null,
+      bio: typeof getBioCacheMetrics === 'function' ? getBioCacheMetrics() : null
+    }
+  });
 });
 
 // MongoDB connection is established at startup

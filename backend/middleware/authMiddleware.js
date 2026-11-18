@@ -14,7 +14,8 @@ const protect = async (req, res, next) => {
   let token = null;
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
     token = req.headers.authorization.split(" ")[1];
-  } else if (req.query?.token) {
+  } else if (req.query && typeof req.query.token === 'string') {
+    // Support EventSource / SSE streams where browser cannot set custom headers
     token = req.query.token;
   }
 
@@ -22,12 +23,18 @@ const protect = async (req, res, next) => {
   if (token) {
     try {
       const decoded = verifyJwt(token);
-      req.user = await User.findById(decoded.id).select("-password");
-      if (req.user) {
-        req.authMethod = 'jwt';
-        return next();
+      if (!decoded || decoded.type !== 'active') {
+        return res.status(401).json({ message: "Not authorized, invalid token type" });
       }
-      return res.status(401).json({ message: "Not authorized, user not found" });
+      req.user = await User.findById(decoded.id).select("-password");
+      if (!req.user) {
+        return res.status(401).json({ message: "Not authorized, user not found" });
+      }
+      if (req.user.lockUntil && req.user.lockUntil > new Date()) {
+        return res.status(423).json({ message: "Account is temporarily locked. Please try again later or unlock your account." });
+      }
+      req.authMethod = 'jwt';
+      return next();
     } catch (error) {
       // JWT verification failed
       // SECURITY: Do NOT fall through to API key - this prevents brute-force attacks
@@ -41,6 +48,9 @@ const protect = async (req, res, next) => {
     try {
       const user = await User.findOne({ apiKeyHash: hashApiKey(apiKey) }).select("-password +apiKeyHash");
       if (user) {
+        if (user.lockUntil && user.lockUntil > new Date()) {
+          return res.status(423).json({ message: "Account is temporarily locked. Please try again later." });
+        }
         req.user = user;
         req.authMethod = 'api-key';
         // Asynchronously update API key metrics
@@ -68,15 +78,22 @@ const optionalProtect = async (req, res, next) => {
   let token = null;
   if (req.headers.authorization && req.headers.authorization.startsWith("Bearer")) {
     token = req.headers.authorization.split(" ")[1];
-  } else if (req.query?.token) {
+  } else if (req.query && typeof req.query.token === 'string') {
+    // Support EventSource / SSE streams where browser cannot set custom headers
     token = req.query.token;
   }
 
   if (token) {
     try {
       const decoded = verifyJwt(token);
-      req.user = await User.findById(decoded.id).select("-password");
-      if (req.user) return next();
+      if (decoded && decoded.type === 'active') {
+        const user = await User.findById(decoded.id).select("-password");
+        if (user && (!user.lockUntil || user.lockUntil <= new Date())) {
+          req.user = user;
+          req.authMethod = 'jwt';
+          return next();
+        }
+      }
     } catch (error) {
       // Token invalid — continue as anonymous
     }
@@ -85,7 +102,7 @@ const optionalProtect = async (req, res, next) => {
   if (apiKey) {
     try {
       const user = await User.findOne({ apiKeyHash: hashApiKey(apiKey) }).select("-password +apiKeyHash");
-      if (user) {
+      if (user && (!user.lockUntil || user.lockUntil <= new Date())) {
         req.user = user;
         req.authMethod = 'api-key';
         User.updateOne(

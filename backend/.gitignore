@@ -7,3 +7,5 @@ node_modules/
 private-uploads/
 .DS_Store
 *.log
+scratch_*.js
+test_results.json

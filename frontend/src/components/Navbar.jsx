@@ -1,5 +1,5 @@
 import { useContext, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AuthContext } from '../context/AuthContext';
 import { ThemeContext } from '../context/ThemeContext';
 import Button from './ui/Button';
@@ -8,7 +8,10 @@ const Navbar = () => {
   const { user, logout } = useContext(AuthContext);
   const { isDark, toggleTheme } = useContext(ThemeContext);
   const navigate = useNavigate();
+  const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+
+  const isActive = (path) => location.pathname === path;
 
   const handleLogout = async () => {
     await logout();
@@ -17,19 +20,20 @@ const Navbar = () => {
   };
 
   return (
-    <header className="fixed top-0 w-full z-50 bg-surface-glass backdrop-blur-md border-b border-border-glass shadow-sm transition-all duration-300">
+    <header className="fixed top-0 w-full z-50 navbar-shell">
       <div className="flex justify-between items-center h-16 px-4 sm:px-6 md:px-8 max-w-container-max mx-auto">
         <div className="flex items-center gap-stack-md">
-          <Link to="/" className="font-display-lg text-headline-md bg-clip-text text-transparent bg-accent-gradient">
-            ShortyURL
+          <Link to="/" className="font-display-lg text-headline-md bg-clip-text text-transparent bg-accent-gradient flex items-center gap-2" aria-label="ShortyURL home">
+            <span className="brand-mark" aria-hidden="true"><span /></span>
+            <span>ShortyURL</span>
           </Link>
         </div>
         
         {user && (
           <nav className="hidden md:flex gap-8">
-            <Link to="/dashboard" className="text-on-surface-variant hover:text-on-surface transition-colors font-body-md text-body-md active:scale-95">Dashboard</Link>
+            <Link to="/dashboard" className={isActive('/dashboard') ? 'nav-link is-active' : 'nav-link'}>Dashboard</Link>
             {user.role === 'admin' && (
-              <Link to="/admin" className="text-on-surface-variant hover:text-on-surface transition-colors font-body-md text-body-md active:scale-95">Admin</Link>
+              <Link to="/admin" className={isActive('/admin') ? 'nav-link is-active' : 'nav-link'}>Admin</Link>
             )}
           </nav>
         )}
@@ -37,8 +41,9 @@ const Navbar = () => {
         <div className="flex items-center gap-4">
           <button 
             onClick={toggleTheme}
-            className="material-symbols-outlined text-on-surface-variant hover:text-on-surface transition-all active:scale-95"
+            className="icon-button material-symbols-outlined text-on-surface-variant hover:text-on-surface transition-all active:scale-95"
             title="Toggle theme"
+            aria-label="Toggle theme"
           >
             {isDark ? 'light_mode' : 'dark_mode'}
           </button>
@@ -66,7 +71,8 @@ const Navbar = () => {
           {/* Mobile Menu Toggle */}
           <button 
             onClick={() => setIsMobileMenuOpen(true)}
-            className="md:hidden text-on-surface-variant active:scale-95 transition-transform flex items-center"
+            className="md:hidden icon-button text-on-surface-variant active:scale-95 transition-transform flex items-center"
+            aria-label="Open menu"
           >
             <span className="material-symbols-outlined">menu</span>
           </button>

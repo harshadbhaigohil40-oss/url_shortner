@@ -306,10 +306,39 @@ const PageLoader = ({ onComplete }) => {
           </TiltCard>
         </div>
 
+        {/* Skip Intro Button */}
+        <button
+          type="button"
+          onClick={() => {
+            if (onComplete && !completedRef.current) {
+              completedRef.current = true;
+              document.body.style.overflow = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              onComplete();
+            }
+          }}
+          className="absolute top-6 right-6 z-50 text-xs px-3.5 py-1.5 rounded-full border border-primary/40 bg-slate-900/80 hover:bg-primary/20 text-primary transition-all cursor-pointer backdrop-blur-md flex items-center gap-1.5 font-mono shadow-lg hover:border-primary"
+          title="Skip animation to app"
+        >
+          <span>Skip Intro</span>
+          <span className="text-sm">→</span>
+        </button>
+
         {/* Scroll Indicator */}
-        <div className="absolute bottom-16 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center animate-bounce text-text-muted glitch-text">
+        <div
+          onClick={() => {
+            if (onComplete && !completedRef.current) {
+              completedRef.current = true;
+              document.body.style.overflow = 'auto';
+              document.documentElement.style.overflow = 'auto';
+              onComplete();
+            }
+          }}
+          className="absolute bottom-16 md:bottom-10 left-1/2 -translate-x-1/2 flex flex-col items-center animate-bounce text-text-muted glitch-text cursor-pointer hover:text-primary transition-colors"
+          title="Click or scroll to continue"
+        >
           <span className="material-symbols-outlined text-3xl">keyboard_arrow_down</span>
-          <span className="font-label-sm text-[10px] tracking-widest uppercase mt-2 font-bold">Scroll Down</span>
+          <span className="font-label-sm text-[10px] tracking-widest uppercase mt-2 font-bold">Scroll Down or Click</span>
         </div>
 
       </div>

@@ -57,6 +57,17 @@ const urlSchema = new mongoose.Schema({
   aiSummary: { type: String, default: null }, // AI-generated content summary
   aiSafetyScore: { type: Number, default: null }, // AI safety score (0-100)
   aiTags: [{ type: String }], // AI content topic tags
+  tags: [{ type: String, trim: true, lowercase: true, maxlength: 30 }], // User-defined categorization tags
+  healthStatus: {
+    type: String,
+    enum: ["healthy", "warning", "broken", "unreachable", "unchecked"],
+    default: "unchecked",
+    index: true
+  },
+  healthStatusCode: { type: Number, default: null },
+  healthResponseTimeMs: { type: Number, default: null },
+  healthLastCheckedAt: { type: Date, default: null },
+  healthError: { type: String, default: null },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, index: { expires: 0 } } // TTL index for auto-deletion of expired links
 });
@@ -64,6 +75,7 @@ const urlSchema = new mongoose.Schema({
 urlSchema.index({ createdAt: -1 });
 urlSchema.index({ user: 1, createdAt: -1 });
 urlSchema.index({ user: 1, clicks: -1 });
+urlSchema.index({ user: 1, tags: 1 });
 // Composite index for dashboard queries
 urlSchema.index({ user: 1, isActive: 1, createdAt: -1 });
 // Fast-path index for redirect lookup

@@ -147,7 +147,7 @@ export default function WorldMapAnalytics({ clickHistory = [] }) {
 
         {/* Floating Tooltip */}
         {hoveredCountry && (
-          <div className="absolute bottom-4 left-4 bg-surface/ border border-indigo-500/40 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 animate-fade-in-up">
+          <div className="absolute bottom-4 left-4 bg-surface-container/90 border border-indigo-500/40 px-4 py-2.5 rounded-xl shadow-2xl backdrop-blur-md flex items-center gap-3 animate-fade-in-up">
             <span className="text-2xl">{countryData[hoveredCountry]?.flag || "🌐"}</span>
             <div>
               <p className="text-xs font-bold text-on-surface">{countryData[hoveredCountry]?.name || hoveredCountry}</p>
@@ -167,7 +167,7 @@ export default function WorldMapAnalytics({ clickHistory = [] }) {
         </h4>
 
         {sortedCountries.length === 0 ? (
-          <div className="p-4 text-center text-xs text-text-muted bg-background/ rounded-xl border border-border-glass">
+          <div className="p-4 text-center text-xs text-text-muted bg-surface-container-low rounded-xl border border-border-glass">
             No geographic click data recorded yet.
           </div>
         ) : (
@@ -181,8 +181,8 @@ export default function WorldMapAnalytics({ clickHistory = [] }) {
                   key={code}
                   onMouseEnter={() => setHoveredCountry(code)}
                   onMouseLeave={() => setHoveredCountry(null)}
-                  className={`p-3.5 rounded-2xl bg-background/ border transition-all duration-300 flex items-center justify-between gap-3 ${
-                    hoveredCountry === code ? 'border-primary/60 bg-primary-container scale-[1.02]' : 'border-border-glass/ hover:border-outline-variant'
+                  className={`p-3.5 rounded-2xl bg-surface-container-low border transition-all duration-300 flex items-center justify-between gap-3 ${
+                    hoveredCountry === code ? 'border-primary/60 bg-primary-container scale-[1.02]' : 'border-border-glass hover:border-outline-variant'
                   }`}
                 >
                   <div className="flex items-center gap-3 truncate">

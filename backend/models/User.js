@@ -28,7 +28,10 @@ const userSchema = new mongoose.Schema({
   otpExpires: {
     type: Date
   },
-  refreshTokens: [String],
+  refreshTokens: {
+    type: [String],
+    default: []
+  },
   failedLoginAttempts: { type: Number, default: 0 },
   lockUntil: { type: Date, default: null },
   passwordResetTokenHash: { type: String, default: null, select: false },

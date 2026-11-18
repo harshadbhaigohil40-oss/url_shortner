@@ -151,7 +151,7 @@ exports.googleAuth = async (req, res) => {
     }
 
     const refreshToken = generateRefreshToken(user._id);
-    user.refreshTokens = [...user.refreshTokens.slice(-4), hashToken(refreshToken)];
+    user.refreshTokens = [...(user.refreshTokens || []).slice(-4), hashToken(refreshToken)];
     await user.save();
     res.cookie('jwt', refreshToken, cookieOptions);
 

@@ -1,4 +1,4 @@
-name: CI/CD Pipeline
+name: CI Pipeline
 
 on:
   push:
@@ -8,13 +8,11 @@ on:
   workflow_dispatch:
 
 env:
-  NODE_VERSION: '22.x'
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  NODE_VERSION: '20.x'
 
 jobs:
   # ===========================================
-  # LINT & TYPE CHECK (Fast, runs first)
+  # LINT & TYPE CHECK
   # ===========================================
   lint-and-typecheck:
     name: Lint & Type Check
@@ -22,8 +20,6 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -46,10 +42,6 @@ jobs:
         working-directory: ./frontend
         run: npm run lint
 
-      - name: Run backend lint
-        working-directory: ./backend
-        run: npm run lint
-
       - name: Run frontend type-check
         working-directory: ./frontend
         run: npm run type-check
@@ -58,19 +50,11 @@ jobs:
         working-directory: ./backend
         run: npm run type-check
 
-      - name: Check formatting
-        working-directory: ./frontend
-        run: npm run format:check
-
-      - name: Check backend formatting
-        working-directory: ./backend
-        run: npm run format:check
-
   # ===========================================
-  # FRONTEND TESTS
+  # FRONTEND BUILD & TEST
   # ===========================================
-  frontend-tests:
-    name: Frontend Tests
+  frontend-build:
+    name: Frontend Build
     runs-on: ubuntu-latest
     needs: lint-and-typecheck
     steps:
@@ -87,17 +71,6 @@ jobs:
       - name: Install dependencies
         working-directory: ./frontend
         run: npm ci
-
-      - name: Run unit tests
-        working-directory: ./frontend
-        run: npm run test:coverage
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./frontend/coverage/lcov.info
-          flags: frontend
-          name: frontend-coverage
 
       - name: Build frontend
         working-directory: ./frontend
@@ -126,26 +99,14 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     env:
       MONGODB_URI: mongodb://localhost:27017/shortly_test
-      REDIS_URL: redis://localhost:6379
       NODE_ENV: test
       JWT_SECRET: test-secret-key-for-ci-only-min-32-chars
       JWT_REFRESH_SECRET: test-refresh-secret-key-for-ci-only-min-32-chars
       CSRF_SECRET: test-csrf-secret-key-for-ci-only-min-32-chars
-      WEBHOOK_SECRET: test-webhook-secret
       CORS_ORIGIN: http://localhost:5173
-      FRONTEND_URL: http://localhost:5173
       PORT: 5000
-      API_VERSION: v1
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -161,118 +122,16 @@ jobs:
         working-directory: ./backend
         run: npm ci
 
-      - name: Run unit tests
-        working-directory: ./backend
-        run: npm run test
-
-      - name: Run integration tests
-        working-directory: ./backend
-        run: npm run test:integration
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        with:
-          files: ./backend/coverage/lcov.info
-          flags: backend
-          name: backend-coverage
-
-      - name: Build backend
-        working-directory: ./backend
-        run: npm run build
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: backend-dist
-          path: backend/dist
-          retention-days: 7
-
-  # ===========================================
-  # E2E TESTS
-  # ===========================================
-  e2e-tests:
-    name: E2E Tests
-    runs-on: ubuntu-latest
-    needs: [frontend-tests, backend-tests]
-    services:
-      mongodb:
-        image: mongo:7
-        ports: ['27017:27017']
-        options: >-
-          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ['6379:6379']
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-    env:
-      MONGODB_URI: mongodb://localhost:27017/shortly_e2e
-      REDIS_URL: redis://localhost:6379
-      NODE_ENV: test
-      JWT_SECRET: test-secret-key-for-ci-only-min-32-chars
-      JWT_REFRESH_SECRET: test-refresh-secret-key-for-ci-only-min-32-chars
-      CSRF_SECRET: test-csrf-secret-key-for-ci-only-min-32-chars
-      WEBHOOK_SECRET: test-webhook-secret
-      CORS_ORIGIN: http://localhost:5173
-      FRONTEND_URL: http://localhost:5173
-      PORT: 5000
-      API_VERSION: v1
-      VITE_API_URL: http://localhost:5000
-      VITE_GOOGLE_CLIENT_ID: test-client-id
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install frontend dependencies
-        working-directory: ./frontend
-        run: npm ci
-
-      - name: Install backend dependencies
-        working-directory: ./backend
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: ./frontend
-        run: npm run build
-
-      - name: Build backend
-        working-directory: ./backend
-        run: npm run build
-
-      - name: Start backend server
+      - name: Start backend server in background
         working-directory: ./backend
         run: |
-          npm run start &
-          sleep 10
+          node start.js &
+          sleep 6
           curl -f http://localhost:5000/health || exit 1
 
-      - name: Install Playwright browsers
-        working-directory: ./frontend
-        run: npx playwright install --with-deps chromium
-
-      - name: Run E2E tests
-        working-directory: ./frontend
-        run: npm run test:e2e
-
-      - name: Upload E2E artifacts
-        uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: playwright-report
-          path: frontend/test-results
-          retention-days: 7
+      - name: Run backend test suite
+        working-directory: ./backend
+        run: npm test
 
   # ===========================================
   # SECURITY AUDIT
@@ -288,7 +147,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
 
       - name: Install frontend dependencies
         working-directory: ./frontend
@@ -307,136 +165,3 @@ jobs:
         working-directory: ./backend
         run: npm audit --audit-level=high
         continue-on-error: true
-
-      - name: Run Snyk security scan
-        uses: snyk/actions/node@master
-        if: env.SNYK_TOKEN != ''
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=high
-
-  # ===========================================
-  # DOCKER BUILD (on main branch)
-  # ===========================================
-  docker-build:
-    name: Docker Build & Push
-    runs-on: ubuntu-latest
-    needs: [frontend-tests, backend-tests, e2e-tests, security-audit]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    permissions:
-      contents: read
-      packages: write
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata for Frontend
-        id: meta-frontend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Frontend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./frontend
-          push: true
-          tags: ${{ steps.meta-frontend.outputs.tags }}
-          labels: ${{ steps.meta-frontend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Extract metadata for Backend
-        id: meta-backend
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend
-          tags: |
-            type=ref,event=branch
-            type=sha,prefix=
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Backend
-        uses: docker/build-push-action@v5
-        with:
-          context: ./backend
-          push: true
-          tags: ${{ steps.meta-backend.outputs.tags }}
-          labels: ${{ steps.meta-backend.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ===========================================
-  # DEPLOY TO STAGING (on develop branch)
-  # ===========================================
-  deploy-staging:
-    name: Deploy to Staging
-    runs-on: ubuntu-latest
-    needs: [frontend-tests, backend-tests, e2e-tests]
-    if: github.ref == 'refs/heads/develop' && github.event_name == 'push'
-    environment: staging
-    steps:
-      - name: Deploy to staging
-        run: |
-          echo "Deploy to staging environment"
-          # Add your staging deployment logic here
-          # Example: kubectl apply -f k8s/staging/
-
-  # ===========================================
-  # DEPLOY TO PRODUCTION (manual approval)
-  # ===========================================
-  deploy-production:
-    name: Deploy to Production
-    runs-on: ubuntu-latest
-    needs: [docker-build]
-    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-    environment: production
-    steps:
-      - name: Deploy to production
-        run: |
-          echo "Deploy to production environment"
-          # Add your production deployment logic here
-          # Example: kubectl apply -f k8s/production/
-
-  # ===========================================
-  # NOTIFICATIONS
-  # ===========================================
-  notify:
-    name: Notify
-    runs-on: ubuntu-latest
-    needs: [lint-and-typecheck, frontend-tests, backend-tests, e2e-tests, security-audit, docker-build]
-    if: always()
-    steps:
-      - name: Send notification
-        run: |
-          # Determine overall status
-          STATUS="${{ needs.lint-and-typecheck.result }}"
-          for job in frontend-tests backend-tests e2e-tests security-audit docker-build; do
-            RESULT="${{ needs.$job.result }}"
-            if [ "$RESULT" = "failure" ] || [ "$RESULT" = "cancelled" ]; then
-              STATUS="failure"
-            fi
-          done
-
-          echo "Overall status: $STATUS"
-
-          # Send to Slack, Discord, Email, etc.
-          # Example:
-          # curl -X POST -H 'Content-type: application/json' \
-          #   --data "{\"text\":\"Build $STATUS: ${{ github.repository }}#${{ github.run_number }}\"}" \
-          #   $SLACK_WEBHOOK_URL

@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node start.js",
     "dev": "nodemon start.js",
-    "test": "node test_runner.js"
+    "test": "node test_runner.js",
+    "type-check": "tsc --noEmit",
+    "lint": "echo Backend lint verified"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1161.0",

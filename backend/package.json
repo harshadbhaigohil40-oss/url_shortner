@@ -5,7 +5,8 @@
   "main": "server.js",
   "scripts": {
     "start": "node start.js",
-    "dev": "nodemon start.js"
+    "dev": "nodemon start.js",
+    "test": "node test_runner.js"
   },
   "dependencies": {
     "@aws-sdk/client-secrets-manager": "^3.1161.0",

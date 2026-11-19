@@ -4,6 +4,10 @@ import { ToastContext } from '../context/ToastContextInstance';
 export const ToastProvider = ({ children }) => {
   const [toasts, setToasts] = useState([]);
 
+  const removeToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
+
   const addToast = useCallback((message, type = 'success', options = {}) => {
     const id = Date.now() + Math.random();
     const duration = options.duration ?? 4000;
@@ -12,11 +16,7 @@ export const ToastProvider = ({ children }) => {
 
     // Return dismiss function for manual control
     return () => removeToast(id);
-  }, []);
-
-  const removeToast = useCallback((id) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
-  }, []);
+  }, [removeToast]);
 
   return (
     <ToastContext.Provider value={{ addToast, removeToast }}>
@@ -127,12 +127,4 @@ const ToastItem = ({ toast, onDone }) => {
       </div>
     </div>
   );
-};
-
-export const useToast = () => {
-  const context = React.useContext(ToastContext);
-  if (!context) {
-    throw new Error('useToast must be used within a ToastProvider');
-  }
-  return context;
 };

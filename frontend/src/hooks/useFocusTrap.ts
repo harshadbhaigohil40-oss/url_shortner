@@ -35,6 +35,8 @@ export const useFocusTrap = (isActive: boolean, containerRef: React.RefObject<HT
       const firstElement = focusableElements[0];
       const lastElement = focusableElements[focusableElements.length - 1];
 
+      if (!firstElement || !lastElement) return;
+
       if (event.shiftKey) {
         if (document.activeElement === firstElement) {
           event.preventDefault();
@@ -61,7 +63,7 @@ export const useFocusTrap = (isActive: boolean, containerRef: React.RefObject<HT
 
     // Focus the first focusable element
     if (focusableElementsRef.current.length > 0) {
-      focusableElementsRef.current[0].focus();
+      focusableElementsRef.current[0]?.focus();
     }
 
     // Add event listener for Tab key

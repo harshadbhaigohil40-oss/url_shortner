@@ -47,6 +47,9 @@ async function runTests() {
       recordResult("CSRF Protection", "PASS", "Get CSRF Token", "Token received", "GET /api/csrf-token", JSON.stringify(csrfRes.data), csrfRes.status, "None");
     } catch (e) {
       recordResult("CSRF Protection", "FAIL", "Get CSRF Token", e.message, "GET /api/csrf-token", e.response?.data || e.message, e.response?.status, "None");
+      console.error(`\n⚠️  ERROR: Unable to connect to backend server at ${BASE_URL}.`);
+      console.error("Please ensure the backend is running ('node start.js' or 'npm run dev').\n");
+      return;
     }
 
     const headers = {

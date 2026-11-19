@@ -165,6 +165,22 @@ export default function QRStudio({ url, shortCode, onClose }) {
               />
             </div>
 
+            <div className="pt-2">
+              <div className="flex justify-between items-center mb-1">
+                <label className="text-xs font-semibold text-text-muted">QR Resolution Size</label>
+                <span className="text-xs font-mono text-primary font-bold">{size}px</span>
+              </div>
+              <input
+                type="range"
+                min="180"
+                max="400"
+                step="20"
+                value={size}
+                onChange={(e) => setSize(Number(e.target.value))}
+                className="w-full h-1.5 bg-surface-container rounded-lg appearance-none cursor-pointer accent-primary"
+              />
+            </div>
+
             <div className="flex items-center justify-between pt-2">
               <label className="text-xs font-semibold text-text-muted flex items-center gap-2 cursor-pointer">
                 <input

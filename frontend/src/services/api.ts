@@ -23,10 +23,9 @@ import type {
   BioPageRequest,
   RealTimeClickEvent,
   ApiKeyInfo,
-  WebhookPayload,
 } from '@/types/api';
 
-const API_URL = import.meta.env.VITE_API_URL || '';
+const API_URL = (import.meta.env['VITE_API_URL'] as string | undefined) || '';
 
 // Token storage keys
 const ACCESS_TOKEN_KEY = 'shortly_access_token';
@@ -47,7 +46,7 @@ interface RefreshTokenResponse {
 
 // State
 let isRefreshing = false;
-let refreshPromise: Promise<string> | null = null;
+let refreshPromise: Promise<string | null> | null = null;
 let authStateListeners: Array<(user: User | null) => void> = [];
 
 // Utility functions
@@ -460,7 +459,7 @@ export const api = {
       }
     };
 
-    eventSource.onerror = (error) => {
+    eventSource.onerror = () => {
       eventSource.close();
       onError?.(new Error('SSE connection lost'));
     };
